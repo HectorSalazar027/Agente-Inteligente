@@ -2,12 +2,16 @@ import os
 import random
 import time
 import threading
+from collections import defaultdict
 
 # ------------------ Config ------------------
-PAUSA = 1.4           # única pausa general entre pasos/acciones
-PAUSA_CARGA = 2       # pausa específica para simular carga de batería
+PAUSA = 1.0            # pausa general entre pasos/acciones (ligeramente menor para pruebas)
+PAUSA_CARGA = 1.5      # pausa para simular carga de batería
 LIMPIAR_CADA_CICLO = True
-# random.seed(42)  # Activar si quieres reproducibilidad
+PROB_OBSTACULO = 0.25  # probabilidad de obstáculo temporal al intentar moverse
+MAX_STEPS = 200        # límite de seguridad del bucle del agente
+EXPORTAR_CSV = False   # True para guardar log en CSV (requiere permisos de escritura)
+# random.seed(42)       # Activar para reproducibilidad
 # ------------------------------------------------
 
 # Utilidades de salida
@@ -20,9 +24,9 @@ habitaciones = {"A": random.randint(0, 99),
 posicion_aspiradora = random.choice(["A", "B"])
 base_carga = "A"
 bateria = 100
-memoria = {"A": None, "B": None}
+memoria = {"A": None, "B": None}  # no se usa para recordar (compatibilidad)
 
-# Historial por habitación y periodo con porcentajes
+# Historial (no imprescindible para metas, pero útil si luego quieres análisis)
 historial_suciedad = {
     "A": {"Día": [], "Tarde": [], "Noche": []},
     "B": {"Día": [], "Tarde": [], "Noche": []}
@@ -30,11 +34,11 @@ historial_suciedad = {
 
 # Rapidez de ensuciamiento (aleatoria por habitación, fija en la ejecución)
 rates = {"A": random.randint(1, 4), "B": random.randint(1, 4)}
-FAST_ROOM = "A" if rates["A"] >= rates["B"] else "B"      # la más rápida para el día 4
+FAST_ROOM = "A" if rates["A"] >= rates["B"] else "B"
 SLOW_ROOM = "B" if FAST_ROOM == "A" else "A"
 
 print(f"Rates de ensuciamiento: A=+{rates['A']} por tick, B=+{rates['B']} por tick")
-print(f"Habitación más rápida (día 4 primero): {FAST_ROOM}")
+print(f"Habitación más rápida (informativo): {FAST_ROOM}")
 
 # Sincronización
 lock = threading.Lock()
@@ -64,17 +68,37 @@ threads = [
 for t in threads:
     t.start()
 
-# ----------------- Lógica principal -----------------
+# ----------------- Utilidades de entorno -----------------
+def estado_entorno():
+    with lock:
+        return {"A": habitaciones["A"], "B": habitaciones["B"]}
 
-def periodo_dia(numero):
-    if numero == 0:
-        return "Día"
-    elif numero == 1:
-        return "Tarde"
-    else:
-        return "Noche"
+def todo_limpio():
+    s = estado_entorno()
+    return s["A"] == 0 and s["B"] == 0
 
-def verificar_bateria():
+def hay_suciedad(hab):
+    with lock:
+        return habitaciones[hab] > 0
+
+def sentido_hacia(otro):
+    """Devuelve 'left' si ir a A, 'right' si ir a B."""
+    return "right" if otro == "B" else "left"
+
+def hay_pared_si_muevo(direction):
+    """Con dos habitaciones: desde A no puedes mover 'left'; desde B no puedes mover 'right'."""
+    if posicion_aspiradora == "A" and direction == "left":
+        return True
+    if posicion_aspiradora == "B" and direction == "right":
+        return True
+    return False
+
+def hay_obstaculo_temporal():
+    return random.random() < PROB_OBSTACULO
+
+# ----------------- Batería -----------------
+def verificar_bateria(metrics):
+    """Si la batería <=15, vuelve a base y recarga. Cuenta tiempos y acciones."""
     global bateria, posicion_aspiradora, base_carga
     if bateria <= 15:
         print("⚠ Batería baja. Moviéndose a la base de carga...")
@@ -82,186 +106,211 @@ def verificar_bateria():
         if posicion_aspiradora != base_carga:
             print("🔄 Desplazándose a la base de carga…")
             posicion_aspiradora = base_carga
-            bateria = max(0, bateria - 10)
+            bateria = max(0, bateria - 10)  # coste por moverse
+            metrics["energia_gastada"] += 10
+            metrics["acciones"]["Move"] += 1
             time.sleep(PAUSA)
         print("⚡ Cargando batería…")
+        t0 = time.perf_counter()
         charging_event.set()  # durante la carga, ambas habitaciones se ensucian
         time.sleep(PAUSA_CARGA)
         bateria = 100
         charging_event.clear()
+        metrics["tiempo_cargando_s"] += (time.perf_counter() - t0)
         print(f"Batería recargada: {bateria}%")
         time.sleep(PAUSA)
         return True
     return False
 
-# --- Fase de observación: SIEMPRE elegir la más sucia ---
-def ciclo_limpieza(periodo, bateria_inicial):
-    global habitaciones, memoria, posicion_aspiradora, bateria, historial_suciedad
+# ----------------- Métricas -----------------
+def nueva_estructura_metricas():
+    m = {
+        "pasos": 0,
+        "acciones": defaultdict(int),  # Suck, Move, Brake, Stop, None
+        "energia_gastada": 0,          # suma de costos (mover 10, aspirar 15)
+        "sucks_utiles": 0,             # aspirados que removieron suciedad real
+        "sucks_innecesarios": 0,       # intentos de aspirar cuando ya estaba limpia
+        "moves_utiles": 0,             # movimiento cuando la otra tenía suciedad
+        "moves_innecesarios": 0,       # movimiento cuando la otra no tenía suciedad
+        "frenadas": 0,                 # brakes (pared u obstáculo)
+        "tiempo_total_s": 0.0,
+        "tiempo_cargando_s": 0.0,
+        "log": []                      # filas dict con snapshot por paso
+    }
+    return m
 
-    if LIMPIAR_CADA_CICLO: limpiar_pantalla()
+def imprimir_resumen_metricas(m):
+    print("\n===== MÉTRICAS =====")
+    print(f"Pasos ejecutados: {m['pasos']}")
+    print(f"Acciones: {dict(m['acciones'])}")
+    print(f"Energía consumida total: {m['energia_gastada']}")
+    print(f"Suck útiles: {m['sucks_utiles']} | Suck innecesarios: {m['sucks_innecesarios']}")
+    print(f"Moves útiles: {m['moves_utiles']} | Moves innecesarios: {m['moves_innecesarios']}")
+    total_sucks = m['sucks_utiles'] + m['sucks_innecesarios']
+    total_moves = m['moves_utiles'] + m['moves_innecesarios']
+    eff_suck = (m['sucks_utiles'] / total_sucks * 100) if total_sucks else 0.0
+    eff_move = (m['moves_utiles'] / total_moves * 100) if total_moves else 0.0
+    total_brakes = m['frenadas']
+    brake_rate = (total_brakes / max(m['pasos'], 1) * 100)
+    print(f"Eficiencia Suck: {eff_suck:.1f}% | Eficiencia Move: {eff_move:.1f}%")
+    print(f"Frenadas: {total_brakes} ({brake_rate:.1f}% de pasos)")
+    print(f"Tiempo total: {m['tiempo_total_s']:.2f}s | Tiempo cargando: {m['tiempo_cargando_s']:.2f}s")
+
+# ----------------- Acciones primitivas (con métricas) -----------------
+def aspirar_actual(metrics):
+    """Suck solo si hay suciedad (meta: no actuar innecesariamente)."""
+    global bateria
     with lock:
-        estado_inicial = dict(habitaciones)
-    print(f"=== {periodo} | Fase de observación ===")
-    print(f"Estado inicial: {estado_inicial}")
-    print(f"Batería inicial: {bateria_inicial}%")
-    print(f"Posición inicial: Habitación {posicion_aspiradora}")
-    bateria = bateria_inicial
-    time.sleep(PAUSA)
-
-    for ciclo in range(3):  # 3 ciclos por periodo
-        if LIMPIAR_CADA_CICLO:
-            limpiar_pantalla()
-            with lock:
-                estado = dict(habitaciones)
-            print(f"=== {periodo} | Ciclo {ciclo+1}/3 ===")
-            print(f"Habitaciones: {estado} | Memoria: {memoria}")
-            print(f"Posición: {posicion_aspiradora} | Batería: {bateria}%")
-            time.sleep(PAUSA)
-
-        verificar_bateria()
-
-        # Elegir SIEMPRE la más sucia (si empatan, permanece donde está si es una de las más sucias)
+        pct = habitaciones[posicion_aspiradora]
+    if pct > 0:
+        print(f"Action: Suck | Habitación {posicion_aspiradora} (antes: {pct}%)")
+        allow_dirt[posicion_aspiradora].clear()
         with lock:
-            a, b = habitaciones["A"], habitaciones["B"]
-        if a > b:
-            objetivo = "A"
-        elif b > a:
-            objetivo = "B"
-        else:
-            objetivo = posicion_aspiradora if posicion_aspiradora in ("A", "B") else "A"
-
-        # Mover si hace falta
-        if posicion_aspiradora != objetivo:
-            posicion_aspiradora = objetivo
-            bateria = max(0, bateria - 10)
-            print(f"➡️  Moviéndose a habitación {posicion_aspiradora}…")
-            time.sleep(PAUSA)
-
-        print(f"📍 La aspiradora está en la habitación {posicion_aspiradora}")
-        print(f"🔋 Batería actual: {bateria}%")
-
-        # Actualizar memoria antes de limpiar
-        with lock:
-            if memoria[posicion_aspiradora] is None:
-                memoria[posicion_aspiradora] = habitaciones[posicion_aspiradora]
-
-            pct_actual = habitaciones[posicion_aspiradora]
-        historial_suciedad[posicion_aspiradora][periodo].append(pct_actual)
-
-        # Limpiar: bloquear ensuciamiento de esta habitación
-        if pct_actual > 0:
-            print(f"🔹 Aspirando la habitación… (antes: {pct_actual}%)")
-            allow_dirt[posicion_aspiradora].clear()
-            with lock:
-                habitaciones[posicion_aspiradora] = 0
-            bateria = max(0, bateria - 15)
-            time.sleep(PAUSA)
-            allow_dirt[posicion_aspiradora].set()
-        else:
-            print("✅ La habitación ya está en 0% (limpia).")
-            time.sleep(PAUSA)
-
-        # (Los hilos siguen ensuciando en paralelo la otra habitación)
-        with lock:
-            estado = dict(habitaciones)
-        print(f"Estado actual: {estado}")
-        print(f"Memoria de la aspiradora: {memoria}")
+            habitaciones[posicion_aspiradora] = 0
+        bateria = max(0, bateria - 15)  # coste limpiar
+        metrics["energia_gastada"] += 15
+        metrics["acciones"]["Suck"] += 1
+        metrics["sucks_utiles"] += 1
         time.sleep(PAUSA)
+        allow_dirt[posicion_aspiradora].set()
+        return True
+    else:
+        print("Action: None | Ya está limpia, no aspiro.")
+        metrics["acciones"]["None"] += 1
+        metrics["sucks_innecesarios"] += 1
+        return False
 
-    return bateria
+def mover(direction, metrics, motivo_util=True):
+    """Move Left/Right con detección de obstáculo (pared u obstáculo temporal)."""
+    global posicion_aspiradora, bateria
+    # pared
+    if hay_pared_si_muevo(direction):
+        print("Action: Brake | Pared detectada, no me muevo.")
+        metrics["acciones"]["Brake"] += 1
+        metrics["frenadas"] += 1
+        time.sleep(PAUSA)
+        return False
+    # obstáculo temporal
+    if hay_obstaculo_temporal():
+        print("Action: Brake | Obstáculo temporal, no me muevo (giro).")
+        metrics["acciones"]["Brake"] += 1
+        metrics["frenadas"] += 1
+        time.sleep(PAUSA)
+        return False
+    # mover
+    if direction == "left":
+        posicion_aspiradora = "A"
+        print("Action: Move Left  | ahora en A")
+    else:
+        posicion_aspiradora = "B"
+        print("Action: Move Right | ahora en B")
+    bateria = max(0, bateria - 10)  # coste mover
+    metrics["energia_gastada"] += 10
+    metrics["acciones"]["Move"] += 1
+    if motivo_util:
+        metrics["moves_utiles"] += 1
+    else:
+        metrics["moves_innecesarios"] += 1
+    time.sleep(PAUSA)
+    return True
 
-# =======================
-# Recolección por 3 días
-# =======================
-NUM_DIAS_OBSERVACION = 3
-ORDEN_PERIODOS = [0, 2, 1]  # Día → Noche → Tarde
+def imprimir_estado():
+    s = estado_entorno()
+    print(f"Estado: A={s['A']}%  B={s['B']}%  | Pos={posicion_aspiradora} | 🔋{bateria}%")
 
-for dia in range(NUM_DIAS_OBSERVACION):
-    for i in ORDEN_PERIODOS:
-        memoria = {"A": None, "B": None}
-        with lock:
-            habitaciones = {"A": random.randint(0, 99),
-                            "B": random.randint(0, 99)}
-        posicion_aspiradora = random.choice(["A", "B"])
-        bateria = ciclo_limpieza(periodo_dia(i), bateria)
+# ----------------- Agente Basado en Metas -----------------
+def run_goal_agent():
+    """
+    Meta: mantener el entorno limpio minimizando acciones innecesarias.
+    Política (sin memoria histórica; sólo perceptos actuales):
+      1) Si todo limpio -> Stop.
+      2) Si actual sucia -> Suck.
+      3) Si la otra está sucia -> mover hacia la otra (respetando obstáculos).
+      4) Si ninguna sucia -> no moverse.
+    """
+    global bateria
 
-# Crear tabla de prioridad basada en porcentajes (promedio por periodo) — informativa
-tabla_prioridad = {"A": {"Día": 0, "Tarde": 0, "Noche": 0},
-                   "B": {"Día": 0, "Tarde": 0, "Noche": 0}}
-for hab, periodos in historial_suciedad.items():
-    for per, valores in periodos.items():
-        tabla_prioridad[hab][per] = (sum(valores) / len(valores)) if valores else 0.0
-
-print("\n📊 Tabla de prioridad (promedio de suciedad observada en 3 días):")
-print(tabla_prioridad)
-time.sleep(PAUSA)
-
-# --- Fase de limpieza priorizada (día 4): usar FAST_ROOM determinado por rates ---
-def ciclo_prioridad(periodo):
-    global memoria, habitaciones, posicion_aspiradora, bateria
+    metrics = nueva_estructura_metricas()
+    t_start = time.perf_counter()
 
     if LIMPIAR_CADA_CICLO: limpiar_pantalla()
-    with lock:
-        estado = dict(habitaciones)
-    print(f"=== {periodo} | Fase de limpieza priorizada ===")
-    print(f"Estado inicial: {estado}")
-    print(f"Batería inicial: {bateria}%")
-    print(f"Posición inicial: Habitación {posicion_aspiradora}")
-    print(f"🔀 Orden de prioridad fijo por rapidez: {FAST_ROOM} → {SLOW_ROOM}")
-    time.sleep(PAUSA)
+    print("=== Agente Basado en Metas (dos habitaciones) ===")
+    imprimir_estado()
+    print("=================================================\n")
 
-    for hab in [FAST_ROOM, SLOW_ROOM]:
-        verificar_bateria()
-        if posicion_aspiradora != hab:
-            posicion_aspiradora = hab
-            bateria = max(0, bateria - 10)
-            print(f"➡️  Moviéndose a habitación {posicion_aspiradora}…")
-            time.sleep(PAUSA)
+    while metrics["pasos"] < MAX_STEPS:
+        metrics["pasos"] += 1
+        print(f"-- Paso {metrics['pasos']} --")
+        s0 = estado_entorno()
+        pos0 = posicion_aspiradora
 
-        print(f"\n📍 La aspiradora está en la habitación {posicion_aspiradora}")
-        print(f"🔋 Batería actual: {bateria}%")
+        imprimir_estado()
 
-        with lock:
-            if memoria[hab] is None:
-                memoria[hab] = habitaciones[hab]
-            pct = habitaciones[hab]
+        # 0) Gestión de energía
+        verificar_bateria(metrics)
 
-        if pct > 0:
-            print(f"🔹 Aspirando la habitación… (antes: {pct}%)")
-            allow_dirt[hab].clear()
-            with lock:
-                habitaciones[hab] = 0
-            bateria = max(0, bateria - 15)
-            time.sleep(PAUSA)
-            allow_dirt[hab].set()
+        # 1) ¿ya está todo limpio?
+        if todo_limpio():
+            print("Action: Stop | Meta alcanzada (A y B limpias).")
+            metrics["acciones"]["Stop"] += 1
+            break
+
+        # 2) Suck si la actual está sucia
+        hizo_suck = aspirar_actual(metrics)
+        if todo_limpio():
+            print("Action: Stop | Meta alcanzada tras aspirar.")
+            metrics["acciones"]["Stop"] += 1
+            break
+
+        # 3) ¿debo moverme a la otra?
+        otra = "B" if posicion_aspiradora == "A" else "A"
+        otra_sucia_antes = hay_suciedad(otra)  # criterio de utilidad del movimiento
+
+        if otra_sucia_antes:
+            dir_to_other = sentido_hacia(otra)
+            moved = mover(dir_to_other, metrics, motivo_util=True)
+            if not moved:
+                # “girar”: intentar la otra dirección (usualmente pared -> Brake, queda registrado)
+                alt = "left" if dir_to_other == "right" else "right"
+                mover(alt, metrics, motivo_util=False)
         else:
-            print("✅ La habitación ya está en 0%.")
+            print("Action: None | La otra también está limpia. Me quedo.")
+            metrics["acciones"]["None"] += 1
+            time.sleep(PAUSA)
 
-        time.sleep(PAUSA)  # los hilos siguen ensuciando la otra
+        # Log del paso
+        s1 = estado_entorno()
+        metrics["log"].append({
+            "paso": metrics["pasos"],
+            "pos_inicio": pos0,
+            "A_ini": s0["A"], "B_ini": s0["B"],
+            "pos_fin": posicion_aspiradora,
+            "A_fin": s1["A"], "B_fin": s1["B"],
+            "bateria": bateria
+        })
+        print()
 
-    with lock:
-        estado = dict(habitaciones)
-    if all(estado_hab == 0 for estado_hab in estado.values()):
-        print("🛑 Ambas habitaciones en 0%. Aspiradora apagada")
+    metrics["tiempo_total_s"] = time.perf_counter() - t_start
+    return metrics
 
-    print(f"Estado actual: {estado}")
-    print(f"Memoria de la aspiradora: {memoria}")
-    time.sleep(PAUSA)
+# ----------------- Entrada principal -----------------
+if __name__ == "__main__":
+    m = run_goal_agent()
+    imprimir_resumen_metricas(m)
 
-# =========================
-# Día 4: limpieza priorizada
-# =========================
-for i in ORDEN_PERIODOS:  # Día → Noche → Tarde
-    memoria = {"A": None, "B": None}
-    with lock:
-        habitaciones = {"A": random.randint(0, 99),
-                        "B": random.randint(0, 99)}
-    posicion_aspiradora = random.choice(["A", "B"])
-    ciclo_prioridad(periodo_dia(i))
+    # (Opcional) Exportar CSV
+    if EXPORTAR_CSV:
+        try:
+            import csv
+            with open("log_agente.csv", "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=["paso","pos_inicio","A_ini","B_ini","pos_fin","A_fin","B_fin","bateria"])
+                writer.writeheader()
+                writer.writerows(m["log"])
+            print('CSV guardado como "log_agente.csv" en el directorio actual.')
+        except Exception as e:
+            print(f"No se pudo guardar CSV: {e}")
 
-print("\n✅ Ejecución completa.")
-
-# Parar hilos limpiamente
-stop_event.set()
-for t in threads:
-    t.join(timeout=1.0)
+    # Parar hilos limpiamente
+    stop_event.set()
+    for t in threads:
+        t.join(timeout=1.0)
