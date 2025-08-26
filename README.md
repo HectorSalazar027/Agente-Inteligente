@@ -42,6 +42,30 @@ Estas métricas permiten comparar eficiencia entre diferentes configuraciones (e
 
 ---
 
+## 🧠 Clasificación del Agente según las Propiedades del Entorno de Tareas  
+
+De acuerdo con la teoría de **entornos de tareas en IA**, nuestro agente aspiradora se clasifica así:  
+
+- **Observable → Parcialmente observable**  
+  El agente solo conoce la suciedad en la habitación donde está, y no tiene una visión completa del entorno al mismo tiempo.  
+
+- **Agentes → Único**  
+  Solo hay un agente actuando (la aspiradora).  
+
+- **Determinístico / Estocástico → Estocástico**  
+  El entorno es incierto porque aparecen obstáculos aleatorios y la suciedad aumenta de manera probabilística.  
+
+- **Episódico / Secuencial → Secuencial**  
+  Las acciones tienen impacto en estados futuros: si la aspiradora no limpia ahora, la suciedad se acumula más adelante.  
+
+- **Estático / Dinámico → Dinámico**  
+  Aunque la aspiradora no actúe, el entorno cambia (la suciedad aumenta con el tiempo).  
+
+- **Discreto / Continuo → Discreto**  
+  Las acciones posibles están en un conjunto finito (aspirar, mover, detenerse), aunque la suciedad tenga valores numéricos.  
+
+---
+
 ## 🧩 Ejemplo de Código Simplificado  
 
 ```python
