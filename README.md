@@ -23,6 +23,14 @@ El sistema busca mostrar cómo se puede **diseñar y programar un agente intelig
 - Controla **batería**, con recarga automática en la base cuando baja del 15%.  
 - El agente **minimiza movimientos innecesarios**: si ambas habitaciones están limpias, no se mueve.  
 
+## Sensores y Actuadores 
+Sensor
+- Detector de suciedad
+- Sensor de posición
+- Detector de batería 
+Actuador
+- Motor de movimiento
+
 ---
 
 ## 📊 Métricas del Agente  
