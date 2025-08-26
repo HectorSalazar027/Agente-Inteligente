@@ -1,85 +1,138 @@
-import random  # Importamos la librería random
-from datetime import datetime
+import random
 
-random.seed  # Opcional: Hace que los resultados sean reproducibles
+# random.seed(42)  # Activar si quieres reproducibilidad
 
-# Definimos el entorno: Dos habitaciones A y B
-habitaciones = {"A": random.choice(["sucio", "limpio"]),"B": 
-    random.choice(["sucio", "limpio"])}
-
-# Posición inicial de la aspiradora (A o B)
+# Inicialización
+habitaciones = {"A": random.choice(["sucio", "limpio"]),
+                "B": random.choice(["sucio", "limpio"])}
 posicion_aspiradora = random.choice(["A", "B"])
-
-# Base de carga
 base_carga = "A"
+bateria = 100
+memoria = {"A": None, "B": None}
+historial_suciedad = {"A": [], "B": []}
 
-# Batería
-bateria= 100
-limpieza= 15  # Consumo por limpiar
-consumo= 10  # Consumo por moverse
-
-def periodo_dia():
-    hora_actual = datetime.now().hour
-    if 6 <= hora_actual < 12:
-        return "mañana"
-    elif 12 <= hora_actual < 18:
-        return "tarde"
+# Función para definir periodo del día
+def periodo_dia(numero):
+    if numero == 0:
+        return "Día"
+    elif numero == 1:
+        return "Tarde"
     else:
-        return "noche"
+        return "Noche"
 
+# Función para verificar y recargar batería
 def verificar_bateria():
-    global bateria, posicion_aspiradora
-    
+    global bateria, posicion_aspiradora, base_carga
     if bateria <= 15:
-        print("⚠ Batería baja. Regresando a la base de carga...")
-        
-        # Mover a la base de carga
+        print("⚠ Batería baja. Moviéndose a la base de carga...")
         if posicion_aspiradora != base_carga:
             print("🔄 Moviéndose a la base de carga...")
             posicion_aspiradora = base_carga
-            bateria -= consumo
+            bateria -= 10
         print("⚡ Cargando batería...")
-        bateria = 100  # Recargar completamente
-        return False
-    
-    return True
+        bateria = 100
+        print(f"Batería recargada: {bateria}%")
+        return True
+    return False
 
-
-def aspiradora_simulacion():
-    global posicion_aspiradora, bateria
+# --- Fase de observación ---
+def ciclo_limpieza(periodo, bateria_inicial):
+    global habitaciones, memoria, posicion_aspiradora, bateria, historial_suciedad
+    print(f"\n{periodo}")
     print(f"Estado inicial: {habitaciones}")
-    print(f"Bateria inicial: {bateria}%")
+    print(f"Batería inicial: {bateria_inicial}%")
     print(f"Posición inicial: Habitación {posicion_aspiradora}")
-    
-    
-    # La aspiradora ejecuta su tarea
-    for ciclo in range(3):  # Simulamos 3 ciclos de limpieza
+    bateria = bateria_inicial
 
-        #verfiicando el estado de la bateria
-        #si la aspiradora estaba cargando, salta al siguiente ciclo
-        if not verificar_bateria():
-            continue 
-        
-        
+    for ciclo in range(6):
+        verificar_bateria()
         print(f"\nLa aspiradora está en la habitación {posicion_aspiradora}")
         print(f"Batería actual: {bateria}%")
-        
+
+        # Actualizar memoria y registrar historial
+        if memoria[posicion_aspiradora] is None:
+            memoria[posicion_aspiradora] = habitaciones[posicion_aspiradora]
         if habitaciones[posicion_aspiradora] == "sucio":
+            historial_suciedad[posicion_aspiradora].append(periodo)
             print("🔹 Aspirando la habitación...")
             habitaciones[posicion_aspiradora] = "limpio"
-            bateria -= limpieza
+            bateria -= 15
         else:
-            print("✅ La habitación ya está limpia. Moviéndome...")
-            
-            if "sucio" in habitaciones.values():
-                print("Cambiando de habitacion")
-                posicion_aspiradora = "A" if posicion_aspiradora == "B" else "B"  # Se mueve a la otra habitación
-                bateria -= consumo
-            else: 
-                print("Ambas habitaciones estan limpias ... Apiradora apagada ")
-        
+            print("✅ La habitación ya está limpia.")
+
+        # Decisión de movimiento
+        if "sucio" in habitaciones.values() or None in memoria.values():
+            posicion_aspiradora = "A" if posicion_aspiradora == "B" else "B"
+            bateria -= 10
+            print("Cambiando de habitacion")
+        else:
+            print("Ambas habitaciones revisadas y limpias. Aspiradora apagada")
+            break
+
         print(f"Estado actual: {habitaciones}")
+        print(f"Memoria de la aspiradora: {memoria}")
 
-# Ejecutar la simulación
-aspiradora_simulacion()
+    return bateria
 
+# Ejecutar fase de observación para Día, Tarde y Noche
+for i in range(3):
+    memoria = {"A": None, "B": None}
+    habitaciones = {"A": random.choice(["sucio", "limpio"]),
+                    "B": random.choice(["sucio", "limpio"])}
+    posicion_aspiradora = random.choice(["A", "B"])
+    bateria = ciclo_limpieza(periodo_dia(i), bateria)
+
+# Crear tabla de prioridad
+tabla_prioridad = {}
+for hab, periodos in historial_suciedad.items():
+    tabla_prioridad[hab] = {"Día": 0, "Tarde": 0, "Noche": 0}
+    for p in periodos:
+        tabla_prioridad[hab][p] += 1
+
+print("\nTabla de prioridad según suciedad registrada:")
+print(tabla_prioridad)
+
+# --- Fase de limpieza priorizada ---
+def ciclo_prioridad(periodo, tabla_prioridad):
+    global memoria, habitaciones, posicion_aspiradora, bateria
+    print(f"\n{periodo} (fase de limpieza priorizada)")
+    print(f"Estado inicial: {habitaciones}")
+    print(f"Batería inicial: {bateria}%")
+    print(f"Posición inicial: Habitación {posicion_aspiradora}")
+
+    # Determinar habitación prioritaria según tabla
+    if tabla_prioridad["A"][periodo] >= tabla_prioridad["B"][periodo]:
+        primero, segundo = "A", "B"
+    else:
+        primero, segundo = "B", "A"
+
+    # Limpiar habitación prioritaria y luego la otra
+    for hab in [primero, segundo]:
+        verificar_bateria()
+        posicion_aspiradora = hab
+        print(f"\nLa aspiradora está en la habitación {posicion_aspiradora}")
+        print(f"Batería actual: {bateria}%")
+
+        if memoria[hab] is None:
+            memoria[hab] = habitaciones[hab]
+
+        if habitaciones[hab] == "sucio":
+            print("🔹 Aspirando la habitación...")
+            habitaciones[hab] = "limpio"
+            bateria -= 15
+        else:
+            print("✅ La habitación ya está limpia.")
+
+    if all(estado == "limpio" for estado in habitaciones.values()):
+        print("Ambas habitaciones revisadas y limpias. Aspiradora apagada")
+
+    print(f"Estado actual: {habitaciones}")
+    print(f"Memoria de la aspiradora: {memoria}")
+
+# Ejecutar limpieza priorizada para Día, Tarde y Noche
+for i in range(3):
+    memoria = {"A": None, "B": None}
+    habitaciones = {"A": random.choice(["sucio", "limpio"]),
+                    "B": random.choice(["sucio", "limpio"])}
+    posicion_aspiradora = random.choice(["A", "B"])
+    ciclo_prioridad(periodo_dia(i), tabla_prioridad)
