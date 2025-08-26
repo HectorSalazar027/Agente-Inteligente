@@ -26,21 +26,40 @@ El sistema busca mostrar cómo los estudiantes pueden **diseñar y programar un 
   - “Hola” → “¡Hola! ¿Cómo puedo ayudarte?”  
   - “Adiós” → “¡Hasta luego!”  
 
+### 4. Aspiradora Inteligente (Agente Basado en Metas)  
+- Simula la limpieza de **dos habitaciones (A y B)**.  
+- Acciones disponibles:  
+  - **Suck** → aspira si hay suciedad.  
+  - **Move Left / Move Right** → se mueve entre habitaciones.  
+  - **Brake** → frena si hay un obstáculo o pared.  
+  - **Stop** → se detiene al cumplir la meta (ambas limpias).  
+- Considera **obstáculos temporales** y **paredes**.  
+- Controla **batería**, con recarga automática en base.  
+- El agente **no se mueve innecesariamente**: si ambas habitaciones están limpias, se detiene.  
+
 ---
 
-## 🧩 Código Base de Ejemplo  
+## 📊 Métricas del Agente  
 
-Se incluye un prototipo de **aspiradora inteligente** que simula la limpieza de dos habitaciones.  
-El agente:  
-1. Evalúa el estado de la habitación actual (limpia o sucia).  
-2. Aspira si encuentra suciedad.  
-3. Cambia de posición si la habitación ya está limpia.  
-4. Registra el estado en cada ciclo de simulación.  
+Al finalizar la simulación, se imprimen métricas que permiten evaluar el desempeño:  
+
+- **Pasos ejecutados** → total de ciclos realizados.  
+- **Acciones realizadas** → cuántos `Suck`, `Move`, `Brake`, `Stop`, `None`.  
+- **Energía consumida** → batería usada en movimientos y aspiraciones.  
+- **Sucks útiles / innecesarios** → aspiraciones que limpiaron suciedad vs. las que no.  
+- **Moves útiles / innecesarios** → movimientos hacia habitaciones realmente sucias vs. innecesarias.  
+- **Frenadas** → número de veces que se encontró con un obstáculo o pared.  
+- **Tiempo total** → duración completa de la simulación.  
+- **Tiempo cargando** → cuánto estuvo recargando batería.  
+
+Estas métricas permiten comparar eficiencia entre diferentes configuraciones (ej. distintas probabilidades de obstáculos o ensuciamiento).  
+
+---
+
+## 🧩 Ejemplo de Código Simplificado  
 
 ```python
 import random  
-
-random.seed(42)  # Semilla para reproducibilidad
 
 habitaciones = {"A": random.choice(["sucio", "limpio"]), 
                 "B": random.choice(["sucio", "limpio"])}
