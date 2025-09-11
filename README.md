@@ -81,7 +81,9 @@ Se puede visualizar que
 - if st2["habitaciones"][st2["posicion"]] > 0 → equivale a **IF SUCIO**
 - self.sim.limpiar_actual() → acción **“Suck”**
 - else implícito → no hace nada, sigue evaluando en el siguiente tick (time.sleep(PAUSA_DECISION))
+
 En otras palabras, el agente decide en tiempo real si limpiar la habitación actual o moverse a otra, basándose en la suciedad.
+
 
 
 ## REPEAT n {...}
@@ -110,7 +112,9 @@ for chunk_points, chunk_time in chunks:
 ``` 
 - El agente divide la limpieza en “chunks” de 25 puntos de suciedad y ejecuta cada pasada secuencialmente.
 - Cada pasada se repite hasta que la suciedad de la habitación llega a 0 o la bolsa se llena.
-Podmeos decir que el **REPEAT n { ... }:** implementa la repetición de la acción de aspirar un chunk n veces según la suciedad total.
+
+Podemos decir que el **REPEAT n { ... }:** implementa la repetición de la acción de aspirar un chunk n veces según la suciedad total.
+
 
 
 ---
