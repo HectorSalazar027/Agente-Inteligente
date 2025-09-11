@@ -8,7 +8,6 @@
 ---
 
 ## 📁 Estructura del proyecto
-> La imagen adjunta en el repositorio muestra esta estructura mínima.
 
 ```
 .
@@ -16,9 +15,6 @@
 ├── codigo-base-grafico.py   ← Demo/visor base (teclado)
 └── codigoFinal.py           ← Versión completa (agente automático + GUI)
 ```
-
-> Puedes insertar tu imagen con:  
-> `![Estructura del proyecto](ruta/a/tu/imagen.png)`
 
 ---
 
