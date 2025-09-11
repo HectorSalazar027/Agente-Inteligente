@@ -41,43 +41,27 @@ Actuador
 
 ---
 
-## 📊 Métricas del Agente  
-
-Al finalizar la simulación, se imprimen métricas para evaluar el desempeño:  
-
-- **Pasos ejecutados** → total de ciclos realizados.  
-- **Acciones realizadas** → cuántos `Suck`, `Clean`, `Charge`, `Move`, `Dump`, `Stop`, `None`.  
-- **Energía consumida** → batería usada en movimientos y aspiraciones.  
-- **Sucks útiles / innecesarios** → aspiraciones que limpiaron suciedad vs. intentos de limpieza en habitaciones ya limpias.  
-- **Moves útiles / innecesarios** → movimientos hacia habitacion mas sucia sucias vs. innecesarias.
-- **Recargas** → número total de veces que la batería bajó de 15% y fue necesario cargar.
-- **Tiempo total** → duración completa de la simulación.  
-- **Tiempo cargando** → cuánto estuvo recargando batería.
-- **Tiempo vaciando** → tiempo acumulado vaciando la bolsa en la habitación D.
-- **Bolsa de basura** → Máximo nivel alcanzado en la bolsa así como  el número de veces que se llenó y obligó a vaciarse.
-
-Estas métricas permiten comparar eficiencia entre diferentes configuraciones (ej. distintas probabilidades de escoger un cuarto o tasas de ensuciamiento).  
 
 ---
 
 ## 🧠 Clasificación del Agente según las Propiedades del Entorno de Tareas  
 
-De acuerdo con la teoría de **entornos de tareas en IA**, nuestro agente aspiradora se clasifica así:  
+De acuerdo con la teoría de **entornos de tareas en IA**, nuestro agente aspiradora mejorado se clasifica así:  
 
 - **Observable → Parcialmente observable**  
-  El agente solo conoce la suciedad en la habitación donde está, y no tiene una visión completa del entorno al mismo tiempo.  
+  El agente solo conoce la suciedad en la habitación donde está así como la batería y la bolsa, y no tiene una visión completa del entorno al mismo tiempo.  
 
 - **Agentes → Único**  
-  Solo hay un agente actuando (la aspiradora).  
+  Solo hay un agente actuando en todo el sistema (la aspiradora).  
 
 - **Determinístico / Estocástico → Estocástico**  
-  El entorno es incierto porque aparecen obstáculos aleatorios y la suciedad aumenta de manera probabilística.  
+  El entorno es incierto por la generación de suciedad y la variabilidad en los tiempos de limpieza. 
 
 - **Episódico / Secuencial → Secuencial**  
-  Las acciones tienen impacto en estados futuros: si la aspiradora no limpia ahora, la suciedad se acumula más adelante.  
+  Las acciones tienen impacto en estados futuros: la suciedad acumulada afecta decisiones posteriores de limpieza y recarga.
 
 - **Estático / Dinámico → Dinámico**  
-  Aunque la aspiradora no actúe, el entorno cambia (la suciedad aumenta con el tiempo).  
+  Aunque la aspiradora no actúe, el entorno cambia (la suciedad aumenta continuamente con el tiempo).  
 
 - **Discreto / Continuo → Discreto**  
   Las acciones posibles están en un conjunto finito (aspirar, mover, detenerse), aunque la suciedad tenga valores numéricos.  
