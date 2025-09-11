@@ -10,7 +10,7 @@ PAUSA_CARGA = 2.0       # pausa para simular carga de batería
 CLEAN_SEC_PER_PERCENT = 0.05 # segundos por % de suciedad (100% -> 5.0s aprox)
 PAUSA_DECISION = 0.06   # pausa entre decisiones del controlador (rápida para buena respuesta)
 ROOMS = ("A", "B", "C", "D")
-# random.seed(42)       # activar si se quiere reproducibilidad
+random.seed(42)       # activar si se quiere reproducibilidad
 
 # ------------------ Backend de simulación ------------------
 class VacuumSim:
