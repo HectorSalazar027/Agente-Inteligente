@@ -68,7 +68,7 @@ De acuerdo con la teoría de **entornos de tareas en IA**, nuestro agente aspira
 
 ## 🧩 Implementación de las Nuevas Instrucciones
 
-## IF SUCIO THEN {...} ELSE {...}
+  - ## IF SUCIO THEN {...} ELSE {...}
 Basándonos en el código principal, esta instrucción se implementa de forma explícita en tiempo real dentro del método del controlador automático _loop() y en limpiar_actual().
 
 ```python
@@ -86,7 +86,7 @@ En otras palabras, el agente decide en tiempo real si limpiar la habitación act
 
 
 
-## REPEAT n {...}
+  - ## REPEAT n {...}
 Esto aparece en la simulación de limpieza en chunks dentro de VacuumSim.limpiar_actual()
 
 ```python
