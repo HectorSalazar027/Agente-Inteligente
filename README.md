@@ -2,8 +2,7 @@
 
 > **Proyecto académico de Inteligencia Artificial — Facultad de Ingeniería, UNAM (Grupo 05)**  
 > **Profesor:** Miguel Pérez Gaspar · **Fecha de entrega:** 11 de septiembre de 2025  
-> Este README está alineado con el contenido del **Reporte_Aspiradora.pdf** y documenta alcance, diseño,
-> ejecución y limitaciones del sistema.
+> Este README documenta alcance, diseño, ejecución y limitaciones del sistema.
 
 ---
 
