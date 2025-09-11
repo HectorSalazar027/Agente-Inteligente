@@ -1,6 +1,6 @@
 # Ingesaurios – Agente Aspiradora Basado en Metas  
 
-Este proyecto fue desarrollado por el equipo **Ingesaurios** con el propósito de aplicar conceptos de **percepción, reglas, optimización y toma de decisiones** en un entorno simulado sencillo.  
+Este proyecto fue desarrollado por el equipo **Ingesaurios** con el propósito de aplicar conceptos de **percepción, reglas, optimización y toma de decisiones** en un entorno simulado sencillo, agregando las nuevas funciones que son importantes para la mejora de la primera entrega. 
 
 ---
 
