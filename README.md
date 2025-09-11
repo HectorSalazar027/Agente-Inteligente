@@ -34,6 +34,7 @@ Sensor
 - Detector de batería
 - Estado de carga
 - Estado de la bolsa de suciedad
+  
 Actuador
 - Motor de movimiento
 - Vaciado de basura o suciedad
