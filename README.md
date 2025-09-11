@@ -12,24 +12,31 @@ El sistema busca mostrar cómo se puede **diseñar y programar un agente intelig
 ## ⚙️ Funcionalidades  
 
 ### Aspiradora Inteligente (Agente Basado en Metas)  
-- Simula la limpieza de **dos habitaciones (A y B)** con suciedad variable entre 0 y 99%.  
+- Simula la limpieza de **cuatro habitaciones (A, B, C y D)**.
+- Cada habitación cuenta con un nivel de suciedad entre 0 y 99%.
+- La suciedad aumenta automáticamente con el tiempo, a distinta velocidad en cada cuarto.  
 - Acciones disponibles:  
-  - **Suck** → aspira si hay suciedad.  
-  - **Move Left / Move Right** → se mueve entre habitaciones.  
-  - **Brake** → frena si hay un obstáculo o pared.  
-  - **Stop** → se detiene al cumplir la meta (ambas limpias).  
-  - **None** → no realiza acción si no es necesario.  
+  - **Suck** → si la habitación actual tiene suciedad, inicia limpieza en bloques de hasta 25%.  
+  - **Move** → se desplaza de la habitación actual a otra más sucia, consumiendo batería.
+  - **Dump** → cuando la bolsa interna se llena, se traslada a la habitación D, vacía la suciedad (parpadeo) y regresa.
+  - **Stop** → se detiene al cumplir la meta.  
+  - **None** → si no hay suciedad y no hay necesidad de recargar o vaciar, permanece quieta.  
 - Considera **obstáculos temporales** y **paredes**.  
-- Controla **batería**, con recarga automática en la base cuando baja del 15%.  
-- El agente **minimiza movimientos innecesarios**: si ambas habitaciones están limpias, no se mueve.  
+- Controla **batería**, si la batería baja de 15%, se traslada a la base (habitación A), se detiene y recarga hasta el 100%. 
+- El agente **minimiza movimientos innecesarios**: El controlador automático siempre elige la(s) habitación(es) con mayor suciedad, si está en una de las habitaciones más sucias, se queda y limpia ahí. Si todas las habitaciones están limpias, no se mueve.
+- Se consdiera la **bolsa de suciedad**: Tiene capacidad limitada y cada vez que limpia, acumula suciedad en la bolsa.
+
 
 ## Sensores y Actuadores 
 Sensor
 - Detector de suciedad
 - Sensor de posición
-- Detector de batería 
+- Detector de batería
+- Estado de carga
+- Estado de la bolsa de suciedad
 Actuador
 - Motor de movimiento
+- Vaciado de basura o suciedad
 
 ---
 
@@ -38,15 +45,17 @@ Actuador
 Al finalizar la simulación, se imprimen métricas para evaluar el desempeño:  
 
 - **Pasos ejecutados** → total de ciclos realizados.  
-- **Acciones realizadas** → cuántos `Suck`, `Move`, `Brake`, `Stop`, `None`.  
+- **Acciones realizadas** → cuántos `Suck`, `Clean`, `Charge`, `Move`, `Dump`, `Stop`, `None`.  
 - **Energía consumida** → batería usada en movimientos y aspiraciones.  
-- **Sucks útiles / innecesarios** → aspiraciones que limpiaron suciedad vs. las que no.  
-- **Moves útiles / innecesarios** → movimientos hacia habitaciones realmente sucias vs. innecesarias.  
-- **Frenadas** → veces que se encontró con un obstáculo o pared.  
+- **Sucks útiles / innecesarios** → aspiraciones que limpiaron suciedad vs. intentos de limpieza en habitaciones ya limpias.  
+- **Moves útiles / innecesarios** → movimientos hacia habitacion mas sucia sucias vs. innecesarias.
+- **Recargas** → número total de veces que la batería bajó de 15% y fue necesario cargar.
 - **Tiempo total** → duración completa de la simulación.  
-- **Tiempo cargando** → cuánto estuvo recargando batería.  
+- **Tiempo cargando** → cuánto estuvo recargando batería.
+- **Tiempo vaciando** → tiempo acumulado vaciando la bolsa en la habitación D.
+- **Bolsa de basura** → Máximo nivel alcanzado en la bolsa así como  el número de veces que se llenó y obligó a vaciarse.
 
-Estas métricas permiten comparar eficiencia entre diferentes configuraciones (ej. distintas probabilidades de obstáculos o tasas de ensuciamiento).  
+Estas métricas permiten comparar eficiencia entre diferentes configuraciones (ej. distintas probabilidades de escoger un cuarto o tasas de ensuciamiento).  
 
 ---
 
