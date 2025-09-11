@@ -11,7 +11,6 @@ Controles:
     Espacio - centrar aspiradora en la habitación 1
     q o Esc - salir
 
-Autor: ChatGPT
 """
 
 import tkinter as tk
