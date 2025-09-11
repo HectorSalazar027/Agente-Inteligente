@@ -1,491 +1,402 @@
-# -*- coding: utf-8 -*-
-"""
-Simulación de un agente aspiradora de dos habitaciones con batería,
-hilos de ensuciamiento estocástico y una política basada en metas.
-
-Este módulo es una **versión documentada** del código original. La lógica
-se mantiene igual, pero se agregan:
-- Docstrings explicativos en el módulo y funciones
-- Comentarios paso a paso
-- Tipos (type hints) para mayor claridad
-- Estructura y encabezados que facilitan el mantenimiento
-
-Resumen de la simulación
-------------------------
-- Hay dos habitaciones: "A" y "B". Cada una tiene un porcentaje de suciedad (0-99).
-- Dos hilos independientes incrementan la suciedad con cierta tasa por "tick".
-- La aspiradora ocupa una de las dos habitaciones y tiene una batería (0-100%).
-- Cuando la batería baja al 15% o menos, el agente va a la base de carga y recarga.
-- El agente es **basado en metas**: intenta mantener todo limpio minimizando
-  acciones innecesarias (mover/suck cuando no aporta).
-- Se registran métricas como: pasos, energía, acciones, eficiencias y tiempos.
-
-Ejecución
----------
-Ejecuta directamente este archivo para ver la simulación en la terminal.
-Si EXPORTAR_CSV=True, se guardará un log de pasos en "log_agente.csv".
-
-Autoría
--------
-Código base del usuario; esta versión añade documentación extensa y mejoras
-de claridad sin alterar la lógica.
-"""
-
-from __future__ import annotations
-
-import os
 import random
 import time
 import threading
-from collections import defaultdict
-from typing import Dict, Any, List
+import tkinter as tk
+from tkinter import ttk
 
-# ============================================================================
-#                                  CONFIG
-# ============================================================================
-# Pausas para simular el tiempo entre pasos y la carga
-PAUSA: float = 1.0            # Pausa general entre pasos/acciones
-PAUSA_CARGA: float = 1.5      # Pausa adicional para simular tiempo de carga
-LIMPIAR_CADA_CICLO: bool = True
-PROB_OBSTACULO: float = 0.25  # Probabilidad de encontrar obstáculo temporal
-MAX_STEPS: int = 200          # Cortafuego para detener la simulación
-EXPORTAR_CSV: bool = False    # True para exportar CSV con el log de pasos
-# random.seed(42)             # Descomenta para ejecuciones reproducibles
+# ------------------ Config ------------------
+PAUSA_TICK = 1.0        # pausa base entre "ticks" de ensuciamiento
+PAUSA_CARGA = 2.0       # pausa para simular carga de batería
+CLEAN_SEC_PER_PERCENT = 0.05 # segundos por % de suciedad (100% -> 5.0s aprox)
+PAUSA_DECISION = 0.06   # pausa entre decisiones del controlador (rápida para buena respuesta)
+ROOMS = ("A", "B", "C", "D")
+# random.seed(42)       # activar si se quiere reproducibilidad
 
-# ============================================================================
-#                           UTILIDADES DE SALIDA
-# ============================================================================
-def limpiar_pantalla() -> None:
-    """Limpia la pantalla de la terminal (Windows/Linux/Unix)."""
-    os.system("cls" if os.name == "nt" else "clear")
+# ------------------ Backend de simulación ------------------
+class VacuumSim:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.stop_event = threading.Event()
+        self.charging_event = threading.Event()  # si está cargando, todas se ensucian
+        # Permiso de ensuciamiento por habitación (para pausar durante limpieza)
+        self.allow_dirt = {r: threading.Event() for r in ROOMS}
+        for r in ROOMS:
+            self.allow_dirt[r].set()
 
+        # Estado por habitación (0-99%)
+        self.habitaciones = {r: random.randint(0, 99) for r in ROOMS}
+        # Tasas fijas 1..4 por habitación
+        self.rates = {r: random.randint(1, 4) for r in ROOMS}
+        self.base_carga = "A"
+        self.posicion = random.choice(ROOMS)
+        self.bateria = 100
 
-# ============================================================================
-#                      ESTADO GLOBAL COMPARTIDO (SIMULADOR)
-# ============================================================================
-# Porcentaje de suciedad por habitación (0-99)
-habitaciones: Dict[str, int] = {
-    "A": random.randint(0, 99),
-    "B": random.randint(0, 99),
-}
+        # Estado de limpieza (para la barra de tiempo)
+        self.cleaning_event = threading.Event()
+        self.clean_total = 0.0
+        self.clean_start = 0.0
 
-# Posición inicial de la aspiradora y base de carga
-posicion_aspiradora: str = random.choice(["A", "B"])
-base_carga: str = "A"
+        # Hilos de ensuciamiento por habitación
+        self.threads = []
+        for r in ROOMS:
+            t = threading.Thread(target=self._hilo_ensuciar, args=(r,), daemon=True)
+            self.threads.append(t)
+            t.start()
 
-# Carga de la batería (0-100)
-bateria: int = 100
+    @staticmethod
+    def _clamp99(x: int) -> int:
+        return 99 if x > 99 else (0 if x < 0 else x)
 
-# "Memoria" no utilizada (compatibilidad con versiones anteriores)
-memoria: Dict[str, Any] = {"A": None, "B": None}
+    def _hilo_ensuciar(self, room: str):
+        """Aumenta el % de suciedad de 'room' periódicamente."""
+        while not self.stop_event.is_set():
+            time.sleep(PAUSA_TICK)
+            if self.charging_event.is_set() or self.allow_dirt[room].is_set():
+                with self.lock:
+                    if self.habitaciones[room] < 99:
+                        self.habitaciones[room] = self._clamp99(self.habitaciones[room] + self.rates[room])
 
-# Histórico (útil si luego se quiere análisis por franja horaria)
-historial_suciedad = {
-    "A": {"Día": [], "Tarde": [], "Noche": []},
-    "B": {"Día": [], "Tarde": [], "Noche": []}
-}
+    # --- API pública ---
+    def get_state(self):
+        with self.lock:
+            # calcular tiempo restante de limpieza
+            cleaning = self.cleaning_event.is_set()
+            if cleaning and self.clean_total > 0:
+                elapsed = max(0.0, time.time() - self.clean_start)
+                remaining = max(0.0, self.clean_total - elapsed)
+            else:
+                remaining = 0.0
+            return {
+                "habitaciones": dict(self.habitaciones),
+                "posicion": self.posicion,
+                "bateria": self.bateria,
+                "rates": dict(self.rates),
+                "cargando": self.charging_event.is_set(),
+                "cleaning": cleaning,
+                "clean_total": self.clean_total,
+                "clean_remaining": remaining,
+            }
 
-# Tasa de ensuciamiento por "tick" (constante durante la ejecución)
-rates: Dict[str, int] = {"A": random.randint(1, 4), "B": random.randint(1, 4)}
-FAST_ROOM: str = "A" if rates["A"] >= rates["B"] else "B"
-SLOW_ROOM: str = "B" if FAST_ROOM == "A" else "A"
+    def is_cleaning(self) -> bool:
+        return self.cleaning_event.is_set()
 
-print(f"Rates de ensuciamiento: A=+{rates['A']} por tick, B=+{rates['B']} por tick")
-print(f"Habitación más rápida (informativo): {FAST_ROOM}")
-
-# ============================================================================
-#                               SINCRONIZACIÓN
-# ============================================================================
-# Bloqueo para proteger lectura/escritura del estado
-lock = threading.Lock()
-
-# Eventos de control
-stop_event = threading.Event()       # Señal para detener hilos de ensuciamiento
-charging_event = threading.Event()   # Si está cargando, ambas se ensucian
-allow_dirt = {                       # Si una habitación puede seguir ensuciándose
-    "A": threading.Event(),
-    "B": threading.Event(),
-}
-allow_dirt["A"].set()
-allow_dirt["B"].set()
-
-
-# ============================================================================
-#                            FUNCIONES DE ENTORNO
-# ============================================================================
-def clamp99(x: int) -> int:
-    """Devuelve 99 si x > 99, de lo contrario x (acota a 0-99)."""
-    return 99 if x > 99 else x
-
-
-def hilo_ensuciar(hab: str) -> None:
-    """
-    Hilo por habitación que incrementa periódicamente la suciedad.
-
-    Reglas:
-    - Cada 'PAUSA' segundos, intenta ensuciar.
-    - Si se está cargando (charging_event) o allow_dirt[hab] está activo,
-      aumenta la suciedad de esa habitación hasta un máximo de 99.
-    """
-    while not stop_event.is_set():
-        time.sleep(PAUSA)  # tick de ensuciamiento
-        if charging_event.is_set() or allow_dirt[hab].is_set():
-            with lock:
-                if habitaciones[hab] < 99:
-                    habitaciones[hab] = clamp99(habitaciones[hab] + rates[hab])
-
-
-# Lanzar hilos de ensuciamiento como demonios (terminan con el proceso)
-threads = [
-    threading.Thread(target=hilo_ensuciar, args=("A",), daemon=True),
-    threading.Thread(target=hilo_ensuciar, args=("B",), daemon=True),
-]
-for t in threads:
-    t.start()
-
-
-def estado_entorno() -> Dict[str, int]:
-    """Devuelve una copia del estado de suciedad de las habitaciones."""
-    with lock:
-        return {"A": habitaciones["A"], "B": habitaciones["B"]}
-
-
-def todo_limpio() -> bool:
-    """True si ambas habitaciones están en 0% de suciedad."""
-    s = estado_entorno()
-    return s["A"] == 0 and s["B"] == 0
-
-
-def hay_suciedad(hab: str) -> bool:
-    """True si la habitación indicada tiene suciedad > 0%."""
-    with lock:
-        return habitaciones[hab] > 0
-
-
-def sentido_hacia(otro: str) -> str:
-    """
-    Devuelve 'left' si el objetivo es ir a A, 'right' si es B.
-    (Ayuda a mapear la habitación destino a una dirección abstracta).
-    """
-    return "right" if otro == "B" else "left"
-
-
-def hay_pared_si_muevo(direction: str) -> bool:
-    """
-    Regla de mundo con dos habitaciones:
-    - Desde A no puedes mover 'left' (hay pared a la izquierda).
-    - Desde B no puedes mover 'right' (hay pared a la derecha).
-    """
-    if posicion_aspiradora == "A" and direction == "left":
-        return True
-    if posicion_aspiradora == "B" and direction == "right":
-        return True
-    return False
-
-
-def hay_obstaculo_temporal() -> bool:
-    """True con probabilidad PROB_OBSTACULO (p.ej., un objeto que bloquea el paso)."""
-    return random.random() < PROB_OBSTACULO
-
-
-# ============================================================================
-#                           GESTIÓN DE BATERÍA
-# ============================================================================
-def verificar_bateria(metrics: Dict[str, Any]) -> bool:
-    """
-    Si la batería <= 15%:
-      - Se mueve a la base (si está en otra habitación), pagando coste de movimiento.
-      - Inicia carga (charging_event): ambas habitaciones siguen ensuciándose.
-      - Recupera batería a 100% y actualiza tiempos/energía en métricas.
-
-    Returns
-    -------
-    bool
-        True si se realizó un ciclo de carga, False si no fue necesario.
-    """
-    global bateria, posicion_aspiradora, base_carga
-    if bateria <= 15:
-        print("⚠ Batería baja. Moviéndose a la base de carga...")
-        time.sleep(PAUSA)
-        if posicion_aspiradora != base_carga:
-            print("🔄 Desplazándose a la base de carga…")
-            posicion_aspiradora = base_carga
-            bateria = max(0, bateria - 10)  # coste de moverse
-            metrics["energia_gastada"] += 10
-            metrics["acciones"]["Move"] += 1
-            time.sleep(PAUSA)
-
-        print("⚡ Cargando batería…")
-        t0 = time.perf_counter()
-        charging_event.set()  # durante la carga, ambas habitaciones se ensucian
-        time.sleep(PAUSA_CARGA)
-        bateria = 100
-        charging_event.clear()
-        metrics["tiempo_cargando_s"] += (time.perf_counter() - t0)
-        print(f"Batería recargada: {bateria}%")
-        time.sleep(PAUSA)
-        return True
-    return False
-
-
-# ============================================================================
-#                                  MÉTRICAS
-# ============================================================================
-def nueva_estructura_metricas() -> Dict[str, Any]:
-    """
-    Estructura de métricas que consolida energía/acciones/tiempos y el log de pasos.
-
-    Claves destacadas:
-    - pasos: contador de iteraciones del bucle principal
-    - acciones: conteo de Suck/Move/Brake/Stop/None
-    - energia_gastada: suma de costos (mover=10, aspirar=15)
-    - sucks_utiles vs sucks_innecesarios: para eficiencia del "Suck"
-    - moves_utiles vs moves_innecesarios: para eficiencia del movimiento
-    - frenadas: paredes u obstáculos encontrados
-    - log: historial por paso con snapshot de estado
-    """
-    m: Dict[str, Any] = {
-        "pasos": 0,
-        "acciones": defaultdict(int),  # Suck, Move, Brake, Stop, None
-        "energia_gastada": 0,          # coste acumulado
-        "sucks_utiles": 0,
-        "sucks_innecesarios": 0,
-        "moves_utiles": 0,
-        "moves_innecesarios": 0,
-        "frenadas": 0,
-        "tiempo_total_s": 0.0,
-        "tiempo_cargando_s": 0.0,
-        "log": []  # cada fila: dict con snapshot por paso
-    }
-    return m
-
-
-def imprimir_resumen_metricas(m: Dict[str, Any]) -> None:
-    """Imprime métricas finales, incluidas eficiencias y tiempo total/carga."""
-    print("\n===== MÉTRICAS =====")
-    print(f"Pasos ejecutados: {m['pasos']}")
-    print(f"Acciones: {dict(m['acciones'])}")
-    print(f"Energía consumida total: {m['energia_gastada']}")
-    print(f"Suck útiles: {m['sucks_utiles']} | Suck innecesarios: {m['sucks_innecesarios']}")
-    print(f"Moves útiles: {m['moves_utiles']} | Moves innecesarios: {m['moves_innecesarios']}")
-    total_sucks = m['sucks_utiles'] + m['sucks_innecesarios']
-    total_moves = m['moves_utiles'] + m['moves_innecesarios']
-    eff_suck = (m['sucks_utiles'] / total_sucks * 100) if total_sucks else 0.0
-    eff_move = (m['moves_utiles'] / total_moves * 100) if total_moves else 0.0
-    total_brakes = m['frenadas']
-    brake_rate = (total_brakes / max(m['pasos'], 1) * 100)
-    print(f"Eficiencia Suck: {eff_suck:.1f}% | Eficiencia Move: {eff_move:.1f}%")
-    print(f"Frenadas: {total_brakes} ({brake_rate:.1f}% de pasos)")
-    print(f"Tiempo total: {m['tiempo_total_s']:.2f}s | Tiempo cargando: {m['tiempo_cargando_s']:.2f}s")
-
-
-# ============================================================================
-#                   ACCIONES PRIMITIVAS (CON MÉTRICAS)
-# ============================================================================
-def aspirar_actual(metrics: Dict[str, Any]) -> bool:
-    """
-    Aspira únicamente si la habitación actual tiene suciedad (>0).
-
-    - Congela temporalmente el ensuciamiento de la habitación actual
-      (allow_dirt.clear), limpia y lo vuelve a permitir.
-    - Descuenta el coste de energía y actualiza métricas de utilidad.
-
-    Returns
-    -------
-    bool
-        True si se aspiró (había suciedad), False si no (ya estaba limpia).
-    """
-    global bateria
-    with lock:
-        pct = habitaciones[posicion_aspiradora]
-
-    if pct > 0:
-        print(f"Action: Suck | Habitación {posicion_aspiradora} (antes: {pct}%)")
-        allow_dirt[posicion_aspiradora].clear()
-        with lock:
-            habitaciones[posicion_aspiradora] = 0
-        bateria = max(0, bateria - 15)  # coste limpiar
-        metrics["energia_gastada"] += 15
-        metrics["acciones"]["Suck"] += 1
-        metrics["sucks_utiles"] += 1
-        time.sleep(PAUSA)
-        allow_dirt[posicion_aspiradora].set()
-        return True
-    else:
-        print("Action: None | Ya está limpia, no aspiro.")
-        metrics["acciones"]["None"] += 1
-        metrics["sucks_innecesarios"] += 1
+    def verificar_bateria_y_cargar_si_hace_falta(self):
+        """Si batería <=15, ir a base A (si no estás) y cargar a 100%."""
+        if self.bateria <= 15 and not self.is_cleaning():
+            if self.posicion != self.base_carga:
+                self.posicion = self.base_carga
+                self.bateria = max(0, self.bateria - 10)
+            self.charging_event.set()
+            time.sleep(PAUSA_CARGA)
+            self.bateria = 100
+            self.charging_event.clear()
+            return True
         return False
 
+    def mover_a(self, destino: str):
+        if destino not in ROOMS or self.is_cleaning():
+            return
+        self.verificar_bateria_y_cargar_si_hace_falta()
+        if self.posicion != destino:
+            self.posicion = destino
+            self.bateria = max(0, self.bateria - 10)
 
-def mover(direction: str, metrics: Dict[str, Any], motivo_util: bool = True) -> bool:
+    def limpiar_actual(self):
+        if self.is_cleaning():
+            return
+        room = self.posicion
+        with self.lock:
+            pct = int(self.habitaciones[room])
+        if pct <= 0:
+            return
+
+    # --- Preparar limpieza en pasadas de 25 puntos porcentuales ---
+    # NUEVA FUNCIONALIDAD REPEAT N VECES: dividir limpieza en chunks de 25 de suciedad
+        remaining = pct
+        chunks = []
+        while remaining > 0:
+            chunk = min(25, remaining)                  # cada pasada quita 25 "puntos" de suciedad
+            chunk_time = max(0.5, chunk * CLEAN_SEC_PER_PERCENT)
+            chunks.append(chunk_time)
+            remaining -= chunk
+        total_time = sum(chunks)
+
+        # Iniciar limpieza (mismo comportamiento que antes)
+        self.clean_total = total_time
+        self.clean_start = time.time()
+        self.cleaning_event.set()
+
+        # Consumir batería una vez al inicio (todo lo demás se queda igual)
+        self.bateria = max(0, self.bateria - 15)
+
+        # Bloquear ensuciamiento SOLO de la habitación actual durante toda la sesión
+        self.allow_dirt[room].clear()
+
+        # --- Ejecutar pasadas secuenciales ---
+        for chunk_time in chunks:
+            # Simular limpieza de esta pasada con steps pequeños para que la GUI muestre progreso continuo
+            step = 0.05
+            end_t = time.time() + chunk_time
+            while time.time() < end_t and not self.stop_event.is_set():
+                time.sleep(step)
+
+            # Al terminar cada pasada, reducir 25 puntos de suciedad y reflejarlo en el estado
+            with self.lock:
+                self.habitaciones[room] = max(0, int(self.habitaciones[room]) - 25)
+
+            # (opcional) si ya quedó en 0 por condiciones externas, salimos
+            with self.lock:
+                if self.habitaciones[room] <= 0:
+                    break
+
+        # Finalizar limpieza
+        with self.lock:
+            self.habitaciones[room] = 0
+        self.allow_dirt[room].set()
+        self.cleaning_event.clear()
+        self.clean_total = 0.0
+        self.clean_start = 0.0
+
+
+# ------------------ Controlador Automático ------------------
+class AutoController:
     """
-    Intenta mover la aspiradora en 'left' o 'right', con chequeo de paredes
-    y obstáculo temporal. Actualiza métricas y coste energético.
-
-    Parameters
-    ----------
-    direction : {'left', 'right'}
-        Dirección abstracta: 'left' implica ir a 'A', 'right' a 'B'.
-    motivo_util : bool
-        True si el movimiento tenía sentido (la otra habitación estaba sucia);
-        False si fue innecesario (la otra estaba limpia).
-
-    Returns
-    -------
-    bool
-        True si el movimiento se realizó; False si hubo pared u obstáculo.
+    - Elegir siempre la(s) habitación(es) más sucia(s).
+    - Empates: quedarse si la posición actual está entre las más sucias; si no, elegir la primera por orden A,B,C,D.
+    - Antes de actuar, verificar/cargar batería.
+    - Respetar cuando está limpiando (no interrumpir).
     """
-    global posicion_aspiradora, bateria
-    # pared
-    if hay_pared_si_muevo(direction):
-        print("Action: Brake | Pared detectada, no me muevo.")
-        metrics["acciones"]["Brake"] += 1
-        metrics["frenadas"] += 1
-        time.sleep(PAUSA)
-        return False
+    def __init__(self, sim: VacuumSim):
+        self.sim = sim
+        self.thread = threading.Thread(target=self._loop, daemon=True)
+        self.stop_event = threading.Event()
 
-    # obstáculo temporal
-    if hay_obstaculo_temporal():
-        print("Action: Brake | Obstáculo temporal, no me muevo (giro).")
-        metrics["acciones"]["Brake"] += 1
-        metrics["frenadas"] += 1
-        time.sleep(PAUSA)
-        return False
+    def start(self):
+        self.thread.start()
 
-    # mover (aplicar cambio de posición y coste)
-    if direction == "left":
-        posicion_aspiradora = "A"
-        print("Action: Move Left  | ahora en A")
-    else:
-        posicion_aspiradora = "B"
-        print("Action: Move Right | ahora en B")
+    def stop(self):
+        self.stop_event.set()
+        self.thread.join(timeout=1.0)
 
-    bateria = max(0, bateria - 10)  # coste mover
-    metrics["energia_gastada"] += 10
-    metrics["acciones"]["Move"] += 1
+    def _loop(self):
+        while not self.stop_event.is_set():
+            # Si está limpiando, no tomar decisiones nuevas
+            if self.sim.is_cleaning():
+                time.sleep(0.05)
+                continue
 
-    if motivo_util:
-        metrics["moves_utiles"] += 1
-    else:
-        metrics["moves_innecesarios"] += 1
+            # 1) Batería
+            self.sim.verificar_bateria_y_cargar_si_hace_falta()
 
-    time.sleep(PAUSA)
-    return True
+            # 2) Medir suciedad
+            st = self.sim.get_state()
+            dirty = st["habitaciones"]
+            max_val = max(dirty.values())
+            candidates = [r for r, v in dirty.items() if v == max_val]
 
+            # 3) Decidir destino
+            if st["posicion"] in candidates:
+                objetivo = st["posicion"]
+            else:
+                objetivo = sorted(candidates, key=lambda r: ROOMS.index(r))[0]
 
-def imprimir_estado() -> None:
-    """Imprime suciedad por habitación, posición actual y nivel de batería."""
-    s = estado_entorno()
-    print(f"Estado: A={s['A']}%  B={s['B']}%  | Pos={posicion_aspiradora} | 🔋{bateria}%")
+            # 4) Mover si es necesario
+            if st["posicion"] != objetivo:
+                self.sim.mover_a(objetivo)
 
+            # 5) Limpiar si hay suciedad
+            st2 = self.sim.get_state()
+            if st2["habitaciones"][st2["posicion"]] > 0 and not self.sim.is_cleaning():
+                self.sim.limpiar_actual()
 
-# ============================================================================
-#                        AGENTE BASADO EN METAS
-# ============================================================================
-def run_goal_agent() -> Dict[str, Any]:
-    """
-    Ejecuta el bucle del agente basado en metas.
+            time.sleep(PAUSA_DECISION)
 
-    Política (sin memoria histórica; sólo perceptos actuales):
-      1) Si todo limpio -> Stop.
-      2) Si la actual está sucia -> Suck.
-      3) Si la otra está sucia -> Mover hacia la otra (respetando obstáculos).
-      4) Si ninguna está sucia -> No moverse (None).
+# ------------------ GUI (Tkinter) ------------------
+class VacuumGUI:
+    def __init__(self, sim: VacuumSim, controller: AutoController):
+        self.sim = sim
+        self.controller = controller
 
-    Métricas: se actualizan paso a paso (energía, tiempos, utilidades, etc.).
-    """
-    global bateria
+        self.root = tk.Tk()
+        self.root.title("Aspiradora Inteligente - Automática (4 habitaciones)")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    metrics = nueva_estructura_metricas()
-    t_start = time.perf_counter()
+        self.W, self.H = 820, 560
+        self.PAD, self.GAP = 24, 24
 
-    if LIMPIAR_CADA_CICLO:
-        limpiar_pantalla()
-    print("=== Agente Basado en Metas (dos habitaciones) ===")
-    imprimir_estado()
-    print("=================================================\n")
+        self.canvas = tk.Canvas(self.root, width=self.W, height=self.H, bg="#f6f6f6", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
 
-    while metrics["pasos"] < MAX_STEPS:
-        metrics["pasos"] += 1
-        print(f"-- Paso {metrics['pasos']} --")
-        s0 = estado_entorno()
-        pos0 = posicion_aspiradora
+        # Panel superior con métricas
+        top = ttk.Frame(self.root)
+        top.pack(fill="x", padx=10, pady=(6, 10))
+        self.lbl_info = ttk.Label(top, text="", font=("Helvetica", 11, "bold"))
+        self.lbl_info.pack(side="left")
 
-        imprimir_estado()
+        # Definir rectángulos 2x2
+        room_width = (self.W - 2 * self.PAD - self.GAP) // 2
+        room_height = (self.H - 2 * self.PAD - self.GAP) // 2
 
-        # 0) Gestión de energía (puede mover a base y cargar)
-        verificar_bateria(metrics)
+        self.rooms = {}
+        # A (arriba izq), B (arriba der), C (abajo izq), D (abajo der)
+        self.rooms["A"] = (self.PAD, self.PAD, self.PAD + room_width, self.PAD + room_height)
+        self.rooms["B"] = (self.PAD + room_width + self.GAP, self.PAD,
+                           self.PAD + room_width * 2 + self.GAP, self.PAD + room_height)
+        self.rooms["C"] = (self.PAD, self.PAD + room_height + self.GAP,
+                           self.PAD + room_width, self.PAD + room_height * 2 + self.GAP)
+        self.rooms["D"] = (self.PAD + room_width + self.GAP, self.PAD + room_height + self.GAP,
+                           self.PAD + room_width * 2 + self.GAP, self.PAD + room_height * 2 + self.GAP)
 
-        # 1) ¿ya está todo limpio?
-        if todo_limpio():
-            print("Action: Stop | Meta alcanzada (A y B limpias).")
-            metrics["acciones"]["Stop"] += 1
-            break
+        # Dibujar habitaciones
+        self.fill_rect = {}
+        self.fill_label = {}
+        for r in ROOMS:
+            x1, y1, x2, y2 = self.rooms[r]
+            self.canvas.create_rectangle(x1, y1, x2, y2, fill="#ffffff", outline="#444", width=2)
+            self.canvas.create_text(x1 + 8, y1 + 8, anchor="nw", text=f"Habitación {r}", font=("Helvetica", 11, "bold"))
+            rid = self.canvas.create_rectangle(x1, y2, x2, y2, fill="#4caf50", outline="")
+            self.fill_rect[r] = rid
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            lid = self.canvas.create_text(cx, cy, text="0%", font=("Helvetica", 16, "bold"))
+            self.fill_label[r] = lid
 
-        # 2) Aspirar si la actual está sucia
-        _ = aspirar_actual(metrics)
+        # Dibujar aspiradora
+        self.vacuum_radius = 16
+        self.vacuum_items = []
+        self._make_vacuum_and_bars()
 
-        if todo_limpio():
-            print("Action: Stop | Meta alcanzada tras aspirar.")
-            metrics["acciones"]["Stop"] += 1
-            break
+        # Iniciar controlador
+        self.controller.start()
 
-        # 3) Decidir si moverse a la otra habitación
-        otra = "B" if posicion_aspiradora == "A" else "A"
-        otra_sucia_antes = hay_suciedad(otra)  # criterio de utilidad del movimiento
+        # Refresco
+        self._tick()
 
-        if otra_sucia_antes:
-            dir_to_other = sentido_hacia(otra)
-            moved = mover(dir_to_other, metrics, motivo_util=True)
-            if not moved:
-                # “Giro” alternativo: intentar la otra dirección
-                alt = "left" if dir_to_other == "right" else "right"
-                mover(alt, metrics, motivo_util=False)
+    # ------ Vacuum + Bars drawing ------
+    def _make_vacuum_and_bars(self):
+        room = self.sim.posicion
+        x1, y1, x2, y2 = self.rooms[room]
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+        r = self.vacuum_radius
+        # Vacuum
+        body = self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#607d8b", outline="#263238", width=2)
+        wnd = self.canvas.create_oval(cx - r/2, cy - r/2, cx - r/6, cy - r/6, fill="#cfd8dc", outline="")
+        antenna = self.canvas.create_line(cx, cy - r, cx, cy - r - 12, width=3)
+        self.vacuum_items = [body, wnd, antenna]
+
+        # Bars layout under the vacuum
+        bar_w = 140
+        bar_h = 10
+        bar_gap = 6
+        top_y = cy + r + 10
+        left_x = cx - bar_w/2
+
+        # Battery bar (background + fill + label)
+        self.batt_bg = self.canvas.create_rectangle(left_x, top_y, left_x + bar_w, top_y + bar_h, outline="#263238", width=1)
+        self.batt_fg = self.canvas.create_rectangle(left_x, top_y, left_x, top_y + bar_h, fill="#4caf50", outline="")
+        self.batt_text = self.canvas.create_text(cx, top_y + bar_h/2, text="Batería 100%", font=("Helvetica", 9))
+
+        # Cleaning time bar (background + fill + label)
+        top2 = top_y + bar_h + bar_gap
+        self.clean_bg = self.canvas.create_rectangle(left_x, top2, left_x + bar_w, top2 + bar_h, outline="#263238", width=1)
+        self.clean_fg = self.canvas.create_rectangle(left_x, top2, left_x, top2 + bar_h, fill="#03a9f4", outline="")
+        self.clean_text = self.canvas.create_text(cx, top2 + bar_h/2, text="Limpieza 0.0s", font=("Helvetica", 9))
+
+    def _move_bars_with_vacuum(self, dx, dy):
+        # Move both bars and their labels
+        for item in (self.batt_bg, self.batt_fg, self.batt_text, self.clean_bg, self.clean_fg, self.clean_text):
+            self.canvas.move(item, dx, dy)
+
+    def move_vacuum_to_room_center(self, room: str):
+        x1, y1, x2, y2 = self.rooms[room]
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+        # current center of oval
+        curr_coords = self.canvas.coords(self.vacuum_items[0])  # oval
+        x0 = (curr_coords[0] + curr_coords[2]) / 2
+        y0 = (curr_coords[1] + curr_coords[3]) / 2
+        dx, dy = cx - x0, cy - y0
+
+        # move vacuum
+        for item in self.vacuum_items:
+            self.canvas.move(item, dx, dy)
+        # move bars
+        self._move_bars_with_vacuum(dx, dy)
+
+    # ------ GUI Tick ------
+    def _tick(self):
+        st = self.sim.get_state()
+        # Actualizar % y barras por habitación
+        for r in ROOMS:
+            x1, y1, x2, y2 = self.rooms[r]
+            pct = int(st["habitaciones"][r])
+            height = (y2 - y1) * (pct / 100.0)
+            new_y = y2 - height
+            self.canvas.coords(self.fill_rect[r], x1, new_y, x2, y2)
+            self.canvas.itemconfigure(self.fill_label[r], text=f"{pct}%")
+
+        # Indicador de carga (borde parpadeante en base A)
+        if st["cargando"]:
+            x1, y1, x2, y2 = self.rooms[self.sim.base_carga]
+            if not hasattr(self, "_charge_indicator"):
+                self._charge_indicator = self.canvas.create_rectangle(x1+2, y1+2, x2-2, y2-2, outline="#ff9800", width=3)
+            else:
+                state = self.canvas.itemcget(self._charge_indicator, "state")
+                self.canvas.itemconfigure(self._charge_indicator, state=("hidden" if state == "normal" else "normal"))
         else:
-            print("Action: None | La otra también está limpia. Me quedo.")
-            metrics["acciones"]["None"] += 1
-            time.sleep(PAUSA)
+            if hasattr(self, "_charge_indicator"):
+                self.canvas.delete(self._charge_indicator)
+                delattr(self, "_charge_indicator")
 
-        # Log del paso
-        s1 = estado_entorno()
-        metrics["log"].append({
-            "paso": metrics["pasos"],
-            "pos_inicio": pos0,
-            "A_ini": s0["A"], "B_ini": s0["B"],
-            "pos_fin": posicion_aspiradora,
-            "A_fin": s1["A"], "B_fin": s1["B"],
-            "bateria": bateria
-        })
-        print()
+        # Texto superior con rates
+        rates_txt = "  ".join([f"{r}=+{st['rates'][r]}/tick" for r in ROOMS])
+        self.lbl_info.config(
+            text=f"Posición: {st['posicion']}   •   Batería: {st['bateria']}%   •   Rates: {rates_txt}"
+        )
 
-    metrics["tiempo_total_s"] = time.perf_counter() - t_start
-    return metrics
+        # Ajustar posición visual si cambió por decisiones
+        self.move_vacuum_to_room_center(st["posicion"])
 
+        # --- Actualizar barra de batería ---
+        # usar width proporcional al % de batería
+        batt_pct = max(0, min(100, int(st["bateria"])))
+        # get current bg coords to compute width and position
+        x1, y1, x2, y2 = self.canvas.coords(self.batt_bg)
+        total_w = x2 - x1
+        fill_w = total_w * (batt_pct / 100.0)
+        self.canvas.coords(self.batt_fg, x1, y1, x1 + fill_w, y2)
+        self.canvas.itemconfigure(self.batt_text, text=f"Batería {batt_pct}%")
 
-# ============================================================================
-#                           ENTRADA PRINCIPAL
-# ============================================================================
+        # --- Actualizar barra de limpieza ---
+        if st["cleaning"] and st["clean_total"] > 0:
+            rem = st["clean_remaining"]
+            tot = st["clean_total"]
+            progress = (tot - rem) / tot if tot > 0 else 0.0
+            # clamp
+            progress = 0.0 if progress < 0 else (1.0 if progress > 1.0 else progress)
+            x1c, y1c, x2c, y2c = self.canvas.coords(self.clean_bg)
+            total_wc = x2c - x1c
+            self.canvas.coords(self.clean_fg, x1c, y1c, x1c + total_wc * progress, y2c)
+            self.canvas.itemconfigure(self.clean_text, text=f"Limpieza {rem:.1f}s")
+        else:
+            # reset cleaning bar to 0
+            x1c, y1c, x2c, y2c = self.canvas.coords(self.clean_bg)
+            self.canvas.coords(self.clean_fg, x1c, y1c, x1c, y2c)
+            self.canvas.itemconfigure(self.clean_text, text="Limpieza 0.0s")
+
+        self.root.after(100, self._tick)
+
+    def on_close(self):
+        self.controller.stop()
+        self.sim.stop_event.set()
+        for t in self.sim.threads:
+            t.join(timeout=1.0)
+        self.root.destroy()
+
+def main():
+    sim = VacuumSim()
+    controller = AutoController(sim)
+    app = VacuumGUI(sim, controller)
+    app.root.mainloop()
+
 if __name__ == "__main__":
-    m = run_goal_agent()
-    imprimir_resumen_metricas(m)
-
-    # (Opcional) Exportar CSV con el log del paso a paso
-    if EXPORTAR_CSV:
-        try:
-            import csv
-            with open("log_agente.csv", "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(
-                    f,
-                    fieldnames=["paso","pos_inicio","A_ini","B_ini","pos_fin","A_fin","B_fin","bateria"]
-                )
-                writer.writeheader()
-                writer.writerows(m["log"])
-            print('CSV guardado como "log_agente.csv" en el directorio actual.')
-        except Exception as e:
-            print(f"No se pudo guardar CSV: {e}")
-
-    # Parar hilos limpiamente (cada hilo es daemon, pero esto es más explícito)
-    stop_event.set()
-    for t in threads:
-        t.join(timeout=1.0)
+    main()
