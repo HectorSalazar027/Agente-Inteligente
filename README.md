@@ -1,151 +1,190 @@
-# Ingesaurios – Agente Aspiradora Basado en Metas  
+# Ingesaurios — Aspiradora Inteligente (Agente Basado en Metas)
 
-Este proyecto fue desarrollado por el equipo **Ingesaurios** con el propósito de aplicar conceptos de **percepción, reglas, optimización y toma de decisiones** en un entorno simulado sencillo, agregando las nuevas funciones que son importantes para la mejora de la primera entrega. 
-
----
-
-## 🎯 Objetivo  
-El sistema busca mostrar cómo se puede **diseñar y programar un agente inteligente** capaz de limpiar habitaciones de manera autónoma, tomando decisiones basadas en el estado actual del entorno y optimizando el uso de su batería.  
+> **Proyecto académico de Inteligencia Artificial — Facultad de Ingeniería, UNAM (Grupo 05)**  
+> **Profesor:** Miguel Pérez Gaspar · **Fecha de entrega:** 11 de septiembre de 2025  
+> Este README está alineado con el contenido del **Reporte_Aspiradora.pdf** y documenta alcance, diseño,
+> ejecución y limitaciones del sistema.
 
 ---
 
-## ⚙️ Funcionalidades  
+## 📁 Estructura del proyecto
+> La imagen adjunta en el repositorio muestra esta estructura mínima.
 
-### Aspiradora Inteligente (Agente Basado en Metas)  
-- Simula la limpieza de **cuatro habitaciones (A, B, C y D)**.
-- Cada habitación cuenta con un nivel de suciedad entre 0 y 99%.
-- La suciedad aumenta automáticamente con el tiempo, a distinta velocidad en cada cuarto.  
-- Acciones disponibles:  
-  - **Suck** → si la habitación actual tiene suciedad, inicia limpieza en bloques de hasta 25%.  
-  - **Move** → se desplaza de la habitación actual a otra más sucia, consumiendo batería.
-  - **Dump** → cuando la bolsa interna se llena, se traslada a la habitación D, vacía la suciedad (parpadeo) y regresa.
-  - **Stop** → se detiene al cumplir la meta.  
-  - **None** → si no hay suciedad y no hay necesidad de recargar o vaciar, permanece quieta.  
-- Considera **obstáculos temporales** y **paredes**.  
-- Controla **batería**, si la batería baja de 15%, se traslada a la base (habitación A), se detiene y recarga hasta el 100%. 
-- El agente **minimiza movimientos innecesarios**: El controlador automático siempre elige la(s) habitación(es) con mayor suciedad, si está en una de las habitaciones más sucias, se queda y limpia ahí. Si todas las habitaciones están limpias, no se mueve.
-- Se consdiera la **bolsa de suciedad**: Tiene capacidad limitada y cada vez que limpia, acumula suciedad en la bolsa.
+```
+.
+├── README.md                ← Este documento
+├── codigo-base-grafico.py   ← Demo/visor base (teclado)
+└── codigoFinal.py           ← Versión completa (agente automático + GUI)
+```
 
-
-## Sensores y Actuadores 
-Sensor
-- Detector de suciedad
-- Sensor de posición
-- Detector de batería
-- Estado de carga
-- Estado de la bolsa de suciedad
-  
-Actuador
-- Motor de movimiento
-- Vaciado de basura o suciedad
-
+> Puedes insertar tu imagen con:  
+> `![Estructura del proyecto](ruta/a/tu/imagen.png)`
 
 ---
 
-## 🧠 Clasificación del Agente según las Propiedades del Entorno de Tareas  
+## 🧭 Introducción
+El proyecto implementa una **aspiradora inteligente** que opera como **agente autónomo** en un entorno
+de **cuatro habitaciones (A–D)**. El agente **percibe** suciedad, batería y capacidad de la bolsa, y **actúa** 
+limpiando, moviéndose, cargando en **A** y vaciando la bolsa en **D**. La **interfaz gráfica (Tkinter)** muestra
+en tiempo real **porcentaje de suciedad**, **posición del robot**, **batería**, **barra de limpieza** y **estado de bolsa**.
 
-De acuerdo con la teoría de **entornos de tareas en IA**, nuestro agente aspiradora mejorado se clasifica así:  
-
-- **Observable → Parcialmente observable**  
-  El agente solo conoce la suciedad en la habitación donde está así como la batería y la bolsa, y no tiene una visión completa del entorno al mismo tiempo.  
-
-- **Agentes → Único**  
-  Solo hay un agente actuando en todo el sistema (la aspiradora).  
-
-- **Determinístico / Estocástico → Estocástico**  
-  El entorno es incierto por la generación de suciedad y la variabilidad en los tiempos de limpieza. 
-
-- **Episódico / Secuencial → Secuencial**  
-  Las acciones tienen impacto en estados futuros: la suciedad acumulada afecta decisiones posteriores de limpieza y recarga.
-
-- **Estático / Dinámico → Dinámico**  
-  Aunque la aspiradora no actúe, el entorno cambia (la suciedad aumenta continuamente con el tiempo).  
-
-- **Discreto / Continuo → Discreto**  
-  Las acciones posibles están en un conjunto finito (aspirar, mover, detenerse), aunque la suciedad tenga valores numéricos.  
+El objetivo didáctico es ir **más allá del agente de reflejo simple**, construyendo un **agente basado en metas** que
+**planea y gestiona recursos** (energía y depósito) con **políticas de decisión** y **nuevas instrucciones de control**
+(IF/ELSE, REPEAT n).
 
 ---
 
-## 🧩 Implementación de las Nuevas Instrucciones
-
-  - ## IF SUCIO THEN {...} ELSE {...}
-Basándonos en el código principal, esta instrucción se implementa de forma explícita en tiempo real dentro del método del controlador automático _loop() y en limpiar_actual().
-
-```python
-# Dentro de AutoController._loop()
-st2 = self.sim.get_state()
-if st2["habitaciones"][st2["posicion"]] > 0 and not self.sim.is_cleaning():
-    self.sim.limpiar_actual()
-``` 
-Se puede visualizar que 
-- if st2["habitaciones"][st2["posicion"]] > 0 → equivale a **IF SUCIO**
-- self.sim.limpiar_actual() → acción **“Suck”**
-- else implícito → no hace nada, sigue evaluando en el siguiente tick (time.sleep(PAUSA_DECISION))
-
-En otras palabras, el agente decide en tiempo real si limpiar la habitación actual o moverse a otra, basándose en la suciedad.
-
-
-
-  - ## REPEAT n {...}
-Esto aparece en la simulación de limpieza en chunks dentro de VacuumSim.limpiar_actual()
-
-```python
-# Dentro de VacuumSim.limpiar_actual()
-remaining = pct
-chunks = []
-while remaining > 0:
-    chunk_points = min(25, remaining)
-    chunk_time = max(0.5, chunk_points * CLEAN_SEC_PER_PERCENT)
-    chunks.append((chunk_points, chunk_time))
-    remaining -= chunk_points
-
-# --- Ejecutar pasadas secuenciales ---
-for chunk_points, chunk_time in chunks:
-    step = 0.05
-    end_t = time.time() + chunk_time
-    while time.time() < end_t and not self.stop_event.is_set():
-        time.sleep(step)
-
-    with self.lock:
-        self.habitaciones[room] = max(0, int(self.habitaciones[room]) - chunk_points)
-        self.bag_level += chunk_points
-``` 
-- El agente divide la limpieza en “chunks” de 25 puntos de suciedad y ejecuta cada pasada secuencialmente.
-- Cada pasada se repite hasta que la suciedad de la habitación llega a 0 o la bolsa se llena.
-
-Podemos decir que el **REPEAT n { ... }:** implementa la repetición de la acción de aspirar un chunk n veces según la suciedad total.
-
-
-
----
-## 🧩 Ejemplo de Código Simplificado  
-
-```python
-import random  
-
-habitaciones = {"A": random.choice(["sucio", "limpio"]), 
-                "B": random.choice(["sucio", "limpio"])}
-
-posicion_aspiradora = random.choice(["A", "B"])
-
-def aspiradora_simulacion():
-    global posicion_aspiradora
-    print(f"Estado inicial: {habitaciones}")
-    
-    for _ in range(3):  # Tres ciclos de limpieza
-        print(f"\nLa aspiradora está en la habitación {posicion_aspiradora}")
-        
-        if habitaciones[posicion_aspiradora] == "sucio":
-            print("🔹 Aspirando...")
-            habitaciones[posicion_aspiradora] = "limpio"
-        else:
-            print("✅ Ya está limpia. Cambiando de habitación...")
-            posicion_aspiradora = "A" if posicion_aspiradora == "B" else "B"
-        
-        print(f"Estado actual: {habitaciones}")
-
-aspiradora_simulacion()
-```  
+## 🧩 Planteamiento del problema (del reporte)
+- Simular una aspiradora real con **propiedades de un agente inteligente** (sensores, actuadores y función de agente).
+- Manejar **retrasos/condiciones** de la tarea: **bolsa llena** (ir a D, vaciar y volver), **batería baja** (ir a A y cargar)
+  y **ensuciamiento continuo** de habitaciones.
+- Buscar **mayor eficiencia**: minimizar movimientos innecesarios y evitar trabajo redundante.
 
 ---
 
+## 🎯 Objetivos (del reporte)
+- Diseñar/programar un agente aspiradora (A–D) que **decida** entre **limpiar** o **moverse** según el estado local,
+  optimizando **batería** y **capacidad de bolsa**.
+- **Corregir errores** del primer diseño y mostrar **evidencia de ejecución**.
+- **Incorporar** las instrucciones: `IF SUCIO THEN {…} ELSE {…}` y `REPEAT n {…}` en el controlador.
+- Superar el enfoque de reflejo simple: operar como **agente basado en metas/desempeño**.
+- Reportar en tiempo real: **suciedad por cuarto, batería, estado de carga, nivel/capacidad de bolsa, tiempo de limpieza
+  y posición actual**.
+
+---
+
+## ⚙️ Funcionalidades (del reporte)
+- **Escenario 2×2 (A, B, C, D)** con **suciedad inicial 0–99%** y **ensuciamiento progresivo** a **tasa fija por cuarto**
+  (1–4 puntos por **tick** de ~1 s). Durante la **limpieza**, se **pausa** el ensuciamiento **solo** del cuarto actual.
+- **Acciones del agente**:
+  - `Clean/Suck` → limpia la habitación **en pasadas** de **hasta 25 puntos**; **consume 15** unidades de batería.
+  - `Move` → desplazamiento a la habitación objetivo (más sucia); **consume 10** unidades de batería.
+  - `Charge` → **carga en A** cuando la batería cae a **≤ 15%** (luego retoma la tarea).
+  - `Dump` → **bolsa con capacidad 200**; al llenarse, **va a D**, **vacía** y **regresa** a continuar.
+  - `Idle` → si no hay nada que limpiar ni gestionar, **permanece en reposo**.
+- **Política de selección/movimiento**:
+  - Elegir **siempre** la(s) **habitación(es) más sucia(s)**.
+  - En empate: **quedarse** si ya está en una de ellas; si no, elegir por orden **A→B→C→D**.
+  - Si **todas están en 0%**, **no se mueve**.
+- **Interfaz gráfica** (Tkinter):
+  - Barras por habitación (suciedad), **posición del robot**, **batería**, **barra de tiempo de limpieza**, indicadores
+    de **carga (A)** y **vaciado (D)**, y **nivel/capacidad de bolsa** + **tasas** de ensuciamiento.
+
+---
+
+## 🛠️ Desarrollo (del reporte)
+- **Sensores**: suciedad por cuarto, posición, batería, estado de carga, **tasas por cuarto**, **nivel/capacidad de bolsa**.
+- **Actuadores**: `Move`, `Clean/Suck`, `Charge`, `Dump`.
+- **Función del agente** (bucle de decisión):
+  1) Si **batería ≤ 15%** → ir a **A** y **cargar**;  
+  2) Si **bolsa llena** → ir a **D** y **vaciar**;  
+  3) Seleccionar **habitación objetivo** siguiendo la política;  
+  4) **Limpiar en pasadas** hasta **0%** y volver al paso 1.
+- **Ambiente**: **dinámico** (ensuciamiento continuo por hilos), **completamente observable** y **espacio de estados finito**.
+
+---
+
+## 🧮 Clasificación del agente según el **entorno de tareas** (del reporte)
+- **Observable** → **Completamente observable** (acceso simultáneo a A–D, batería, posición, tasas y bolsa).
+- **Agentes** → **Único** (una sola aspiradora).
+- **Determinístico / Estocástico** → **Determinístico** tras la aleatorización inicial (suciedad/tasas).
+- **Episódico / Secuencial** → **Secuencial** (decisiones influyen estados futuros).
+- **Estático / Dinámico** → **Dinámico** (suciedad progresa aun si el agente no actúa).
+- **Discreto / Continuo** → **Discreto** (ticks/porcentajes/decisiones).
+
+---
+
+## 🧱 Problemas y limitaciones (del reporte)
+- **Reproducibilidad**: semilla aleatoria **desactivada** (escenarios cambian por corrida).
+- **Movimiento idealizado**: traslados **instantáneos** (sin ruta/tiempo/colisiones); costo energético **fijo**.
+- **Sin criterio de paro global**: con todo en 0% el ciclo **continúa** (no hay meta *Stop*).
+- **Empates sesgados**: orden A→D en igualdad puede **sesgar atención**.
+- **Concurrencia**: algunas lecturas/actualizaciones **sin bloqueo total** (UI puede mostrar estados intermedios).
+- **Modelo de limpieza simplificado**: **chunks=25**, tiempo **lineal** por %; **bolsa rígida**.
+- **Progreso parcial**: la **barra de limpieza** no incluye traslados ni vaciado; `clean_total` puede no ajustarse tras interrupciones.
+- **Energía idealizada**: consumos `-15` (limpiar) y `-10` (moverse); sin envejecimiento/pérdidas/carga dependiente del nivel.
+
+---
+
+## 🧠 Instrucciones de control implementadas (del reporte)
+### 1) `IF SUCIO THEN { limpiar_actual() } ELSE { … }`
+- Condición: **suciedad > 0** en la **habitación actual** y **no** hay limpieza en curso.  
+- Efecto: **inicia** limpieza; en caso **contrario** (ELSE), el agente **no aspira** en ese instante y continúa
+  el **ciclo de decisión** (ej. moverse u esperar).
+
+### 2) `REPEAT n { … }` (limpieza por **pasadas**)
+- Si la habitación tiene `pct` de suciedad, se calcula `n = ceil(pct/25)` y se **repite** la secuencia de limpieza
+  **n veces** con **chunks de ≤25 puntos**; cada pasada **suma** al **nivel de bolsa**.
+- Durante cada pasada se **pausa el ensuciamiento** del cuarto actual.
+
+---
+
+## 🧪 Casos de prueba (del reporte)
+- **IF SUCIO — ejemplo 1/2**: el robot **inicia** limpieza cuando la habitación actual tiene `%>0` y no hay limpieza en curso
+  (se ve la **barra “Limpieza”** activa).
+- **REPEAT n — ejemplo**: se observa el avance por **pasadas** (~25 puntos) y el **aumento de la bolsa** cada pasada.
+- **Caso negativo (batería)**: con **batería 0%**, **no** se inicia limpieza aunque haya suciedad (control negativo).
+
+---
+
+## 🖥️ Requisitos para ejecutar
+- **Python 3.9+** (probado en 3.10/3.11).
+- **Tkinter** (incluido en Windows y Python oficial para macOS).  
+  - **Linux/WSL**: `sudo apt-get install python3-tk`.
+
+_No hay dependencias adicionales de `pip`._
+
+---
+
+## ▶️ Cómo ejecutar
+Desde la carpeta del proyecto:
+
+```bash
+# Versión automática completa
+python codigoFinal.py
+
+# Visor base (demo con teclado)
+python codigo-base-grafico.py
+```
+
+La **ventana Tkinter** mostrará el entorno 2×2. Cierra la ventana para terminar la simulación.
+
+> *Tip:* si necesitas **reproducibilidad**, agrega una **semilla** (`random.seed(...)`) al inicio del código.
+
+---
+
+## 🔧 Parámetros y configuración sugerida
+Estos valores aparecen en el código final y/o se desprenden del reporte:
+- **Tick de ensuciamiento**: ~**1 s** por actualización de tasas (1–4 puntos por cuarto).
+- **Pasadas de limpieza**: **25 puntos** máximo por pasada.
+- **Consumo energético**: **-15** al limpiar; **-10** al moverse.
+- **Batería**: umbral de **≤15%** para **cargar en A**.
+- **Bolsa**: capacidad **200**; **vaciar en D** al llenarse.
+
+Puedes exponerlos como **constantes** para facilitar experimentación (p. ej., `CLEAN_SEC_PER_PERCENT`, `BAG_CAPACITY`, `MOVE_COST`).
+
+---
+
+## 📌 Métricas en la UI
+- **Suciedad** por A, B, C, D (%)
+- **Posición** actual del robot
+- **Batería** y **estado de carga**
+- **Barra “Limpieza”** (tiempo restante)
+- **Nivel/Capacidad de bolsa** (y **vaciado** en D)
+- **Tasas** de ensuciamiento por cuarto
+
+---
+
+## 🗺️ Roadmap (extensiones posibles)
+- **Criterio de paro** configurable (p. ej., “todas ≤X% por Y s”).
+- **Movimiento con ruta/tiempo** (distancias, obstáculos, colisiones) y **costos realistas**.
+- **Planificador** por utilidad/costo-tiempo (no solo “más sucia”).
+- **Ruido/estocasticidad** en sensores/actuadores y **fallos**.
+- **Telemetría** (CSV/JSON) y **tests automáticos**.
+- **Semilla** configurable por **CLI**.
+
+---
+
+## 👥 Créditos
+Trabajo del equipo **Ingesaurios** para la materia de **Inteligencia Artificial** (Grupo 05).  
+Este repositorio es de **uso académico** y refleja los resultados y hallazgos del **Reporte_Aspiradora.pdf**.
