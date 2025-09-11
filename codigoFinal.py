@@ -36,6 +36,11 @@ class VacuumSim:
         self.clean_total = 0.0
         self.clean_start = 0.0
 
+        # --- NUEVA FUNCIONALIDAD BOLSA DE BASURA: estado de bolsa y evento de vaciado ---
+        self.bag_capacity = 200      # capacidad máxima (puntos de suciedad)
+        self.bag_level = 0           # suciedad acumulada en la bolsa
+        self.dumping_event = threading.Event()  # parpadeo en D mientras se vacía
+
         # Hilos de ensuciamiento por habitación
         self.threads = []
         for r in ROOMS:
@@ -75,6 +80,10 @@ class VacuumSim:
                 "cleaning": cleaning,
                 "clean_total": self.clean_total,
                 "clean_remaining": remaining,
+                # --- NUEVA FUNCIONALIDAD BOLSA DE BASURA: exponer estado de bolsa y vaciado ---
+                "bag_level": self.bag_level,
+                "bag_capacity": self.bag_capacity,
+                "dumping": self.dumping_event.is_set(),
             }
 
     def is_cleaning(self) -> bool:
@@ -101,6 +110,20 @@ class VacuumSim:
             self.posicion = destino
             self.bateria = max(0, self.bateria - 10)
 
+    # --- NUEVA FUNCIONALIDAD BOLSA DE BASURA: vaciar en habitación D con parpadeo ---
+    def _vaciar_bolsa_en_D(self):
+        # Pausa por batería si aplica (no se limpia durante el traslado)
+        self.verificar_bateria_y_cargar_si_hace_falta()
+        # Ir a D si no estamos
+        if self.posicion != "D":
+            self.posicion = "D"
+            self.bateria = max(0, self.bateria - 10)
+        # Parpadeo durante vaciado
+        self.dumping_event.set()
+        time.sleep(1.5)  # tiempo de vaciado
+        self.bag_level = 0
+        self.dumping_event.clear()
+
     def limpiar_actual(self):
         if self.is_cleaning():
             return
@@ -110,18 +133,18 @@ class VacuumSim:
         if pct <= 0:
             return
 
-    # --- Preparar limpieza en pasadas de 25 puntos porcentuales ---
-    # NUEVA FUNCIONALIDAD REPEAT N VECES: dividir limpieza en chunks de 25 de suciedad
+        # --- Preparar limpieza en pasadas de 25 puntos porcentuales ---
+        # NUEVA FUNCIONALIDAD REPEAT N VECES: dividir limpieza en chunks de 25 de suciedad
         remaining = pct
         chunks = []
         while remaining > 0:
-            chunk = min(25, remaining)                  # cada pasada quita 25 "puntos" de suciedad
-            chunk_time = max(0.5, chunk * CLEAN_SEC_PER_PERCENT)
-            chunks.append(chunk_time)
-            remaining -= chunk
-        total_time = sum(chunks)
+            chunk_points = min(25, remaining)                  # cada pasada quita 25 "puntos" de suciedad
+            chunk_time = max(0.5, chunk_points * CLEAN_SEC_PER_PERCENT)
+            chunks.append((chunk_points, chunk_time))
+            remaining -= chunk_points
+        total_time = sum(t for _, t in chunks)
 
-        # Iniciar limpieza (mismo comportamiento que antes)
+        # Iniciar limpieza
         self.clean_total = total_time
         self.clean_start = time.time()
         self.cleaning_event.set()
@@ -133,21 +156,43 @@ class VacuumSim:
         self.allow_dirt[room].clear()
 
         # --- Ejecutar pasadas secuenciales ---
-        for chunk_time in chunks:
+        for chunk_points, chunk_time in chunks:
             # Simular limpieza de esta pasada con steps pequeños para que la GUI muestre progreso continuo
             step = 0.05
             end_t = time.time() + chunk_time
             while time.time() < end_t and not self.stop_event.is_set():
                 time.sleep(step)
 
-            # Al terminar cada pasada, reducir 25 puntos de suciedad y reflejarlo en el estado
+            # Al terminar cada pasada, reducir "chunk_points" de suciedad y reflejarlo en el estado
             with self.lock:
-                self.habitaciones[room] = max(0, int(self.habitaciones[room]) - 25)
+                # Restar del cuarto
+                self.habitaciones[room] = max(0, int(self.habitaciones[room]) - chunk_points)
+                # --- NUEVA FUNCIONALIDAD BOLSA DE BASURA: acumular en bolsa ---
+                self.bag_level += chunk_points
 
             # (opcional) si ya quedó en 0 por condiciones externas, salimos
             with self.lock:
                 if self.habitaciones[room] <= 0:
-                    break
+                    pass_room_empty = True
+                else:
+                    pass_room_empty = False
+
+            # --- NUEVA FUNCIONALIDAD BOLSA DE BASURA: si bolsa llena, interrumpir y vaciar en D ---
+            if self.bag_level >= self.bag_capacity:
+                # Pausar "limpieza en curso" durante el traslado y vaciado
+                self.cleaning_event.clear()
+                # Mantener bloqueado el ensuciamiento de la habitación en la que estábamos
+                # Ir a D, vaciar con parpadeo y volver
+                self._vaciar_bolsa_en_D()
+                # Regresar a la habitación que estábamos limpiando
+                if self.posicion != room:
+                    self.posicion = room
+                    self.bateria = max(0, self.bateria - 10)
+                # Reanudar bandera de limpieza (el tiempo total visual no incluye este traslado)
+                self.cleaning_event.set()
+
+            if pass_room_empty:
+                break
 
         # Finalizar limpieza
         with self.lock:
@@ -347,19 +392,31 @@ class VacuumGUI:
                 self.canvas.delete(self._charge_indicator)
                 delattr(self, "_charge_indicator")
 
+        # --- NUEVA FUNCIONALIDAD BOLSA DE BASURA: parpadeo en D al vaciar ---
+        if st["dumping"]:
+            x1, y1, x2, y2 = self.rooms["D"]
+            if not hasattr(self, "_dump_indicator"):
+                self._dump_indicator = self.canvas.create_rectangle(x1+2, y1+2, x2-2, y2-2, outline="#e91e63", width=3)
+            else:
+                state = self.canvas.itemcget(self._dump_indicator, "state")
+                self.canvas.itemconfigure(self._dump_indicator, state=("hidden" if state == "normal" else "normal"))
+        else:
+            if hasattr(self, "_dump_indicator"):
+                self.canvas.delete(self._dump_indicator)
+                delattr(self, "_dump_indicator")
+
         # Texto superior con rates
         rates_txt = "  ".join([f"{r}=+{st['rates'][r]}/tick" for r in ROOMS])
+        # Mostrar también nivel de bolsa
         self.lbl_info.config(
-            text=f"Posición: {st['posicion']}   •   Batería: {st['bateria']}%   •   Rates: {rates_txt}"
+            text=f"Posición: {st['posicion']}   •   Batería: {st['bateria']}%   •   Bolsa: {st['bag_level']}/{st['bag_capacity']}   •   Rates: {rates_txt}"
         )
 
         # Ajustar posición visual si cambió por decisiones
         self.move_vacuum_to_room_center(st["posicion"])
 
         # --- Actualizar barra de batería ---
-        # usar width proporcional al % de batería
         batt_pct = max(0, min(100, int(st["bateria"])))
-        # get current bg coords to compute width and position
         x1, y1, x2, y2 = self.canvas.coords(self.batt_bg)
         total_w = x2 - x1
         fill_w = total_w * (batt_pct / 100.0)
@@ -371,14 +428,12 @@ class VacuumGUI:
             rem = st["clean_remaining"]
             tot = st["clean_total"]
             progress = (tot - rem) / tot if tot > 0 else 0.0
-            # clamp
             progress = 0.0 if progress < 0 else (1.0 if progress > 1.0 else progress)
             x1c, y1c, x2c, y2c = self.canvas.coords(self.clean_bg)
             total_wc = x2c - x1c
             self.canvas.coords(self.clean_fg, x1c, y1c, x1c + total_wc * progress, y2c)
             self.canvas.itemconfigure(self.clean_text, text=f"Limpieza {rem:.1f}s")
         else:
-            # reset cleaning bar to 0
             x1c, y1c, x2c, y2c = self.canvas.coords(self.clean_bg)
             self.canvas.coords(self.clean_fg, x1c, y1c, x1c, y2c)
             self.canvas.itemconfigure(self.clean_text, text="Limpieza 0.0s")
