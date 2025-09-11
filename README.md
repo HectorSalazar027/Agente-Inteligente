@@ -39,8 +39,6 @@ Actuador
 - Motor de movimiento
 - Vaciado de basura o suciedad
 
----
-
 
 ---
 
@@ -68,6 +66,54 @@ De acuerdo con la teoría de **entornos de tareas en IA**, nuestro agente aspira
 
 ---
 
+## 🧩 Implementación de las Nuevas Instrucciones
+
+## IF SUCIO THEN {...} ELSE {...}
+Basándonos en el código principal, esta instrucción se implementa de forma explícita en tiempo real dentro del método del controlador automático _loop() y en limpiar_actual().
+
+```python
+# Dentro de AutoController._loop()
+st2 = self.sim.get_state()
+if st2["habitaciones"][st2["posicion"]] > 0 and not self.sim.is_cleaning():
+    self.sim.limpiar_actual()
+``` 
+Se puede visualizar que 
+- if st2["habitaciones"][st2["posicion"]] > 0 → equivale a **IF SUCIO**
+- self.sim.limpiar_actual() → acción **“Suck”**
+- else implícito → no hace nada, sigue evaluando en el siguiente tick (time.sleep(PAUSA_DECISION))
+En otras palabras, el agente decide en tiempo real si limpiar la habitación actual o moverse a otra, basándose en la suciedad.
+
+
+## REPEAT n {...}
+Esto aparece en la simulación de limpieza en chunks dentro de VacuumSim.limpiar_actual()
+
+```python
+# Dentro de VacuumSim.limpiar_actual()
+remaining = pct
+chunks = []
+while remaining > 0:
+    chunk_points = min(25, remaining)
+    chunk_time = max(0.5, chunk_points * CLEAN_SEC_PER_PERCENT)
+    chunks.append((chunk_points, chunk_time))
+    remaining -= chunk_points
+
+# --- Ejecutar pasadas secuenciales ---
+for chunk_points, chunk_time in chunks:
+    step = 0.05
+    end_t = time.time() + chunk_time
+    while time.time() < end_t and not self.stop_event.is_set():
+        time.sleep(step)
+
+    with self.lock:
+        self.habitaciones[room] = max(0, int(self.habitaciones[room]) - chunk_points)
+        self.bag_level += chunk_points
+``` 
+- El agente divide la limpieza en “chunks” de 25 puntos de suciedad y ejecuta cada pasada secuencialmente.
+- Cada pasada se repite hasta que la suciedad de la habitación llega a 0 o la bolsa se llena.
+Podmeos decir que el **REPEAT n { ... }:** implementa la repetición de la acción de aspirar un chunk n veces según la suciedad total.
+
+
+---
 ## 🧩 Ejemplo de Código Simplificado  
 
 ```python
@@ -98,3 +144,4 @@ aspiradora_simulacion()
 ```  
 
 ---
+
