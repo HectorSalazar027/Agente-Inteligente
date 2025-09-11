@@ -34,7 +34,7 @@ El objetivo didáctico es ir **más allá del agente de reflejo simple**, constr
 
 ---
 
-## 🧩 Planteamiento del problema (del reporte)
+## 🧩 Planteamiento del problema
 - Simular una aspiradora real con **propiedades de un agente inteligente** (sensores, actuadores y función de agente).
 - Manejar **retrasos/condiciones** de la tarea: **bolsa llena** (ir a D, vaciar y volver), **batería baja** (ir a A y cargar)
   y **ensuciamiento continuo** de habitaciones.
@@ -42,7 +42,7 @@ El objetivo didáctico es ir **más allá del agente de reflejo simple**, constr
 
 ---
 
-## 🎯 Objetivos (del reporte)
+## 🎯 Objetivos
 - Diseñar/programar un agente aspiradora (A–D) que **decida** entre **limpiar** o **moverse** según el estado local,
   optimizando **batería** y **capacidad de bolsa**.
 - **Corregir errores** del primer diseño y mostrar **evidencia de ejecución**.
@@ -53,7 +53,7 @@ El objetivo didáctico es ir **más allá del agente de reflejo simple**, constr
 
 ---
 
-## ⚙️ Funcionalidades (del reporte)
+## ⚙️ Funcionalidades
 - **Escenario 2×2 (A, B, C, D)** con **suciedad inicial 0–99%** y **ensuciamiento progresivo** a **tasa fija por cuarto**
   (1–4 puntos por **tick** de ~1 s). Durante la **limpieza**, se **pausa** el ensuciamiento **solo** del cuarto actual.
 - **Acciones del agente**:
@@ -72,7 +72,7 @@ El objetivo didáctico es ir **más allá del agente de reflejo simple**, constr
 
 ---
 
-## 🛠️ Desarrollo (del reporte)
+## 🛠️ Desarrollo 
 - **Sensores**: suciedad por cuarto, posición, batería, estado de carga, **tasas por cuarto**, **nivel/capacidad de bolsa**.
 - **Actuadores**: `Move`, `Clean/Suck`, `Charge`, `Dump`.
 - **Función del agente** (bucle de decisión):
@@ -84,7 +84,7 @@ El objetivo didáctico es ir **más allá del agente de reflejo simple**, constr
 
 ---
 
-## 🧮 Clasificación del agente según el **entorno de tareas** (del reporte)
+## 🧮 Clasificación del agente según el **entorno de tareas** 
 - **Observable** → **Completamente observable** (acceso simultáneo a A–D, batería, posición, tasas y bolsa).
 - **Agentes** → **Único** (una sola aspiradora).
 - **Determinístico / Estocástico** → **Determinístico** tras la aleatorización inicial (suciedad/tasas).
@@ -94,7 +94,7 @@ El objetivo didáctico es ir **más allá del agente de reflejo simple**, constr
 
 ---
 
-## 🧱 Problemas y limitaciones (del reporte)
+## 🧱 Problemas y limitaciones
 - **Reproducibilidad**: semilla aleatoria **desactivada** (escenarios cambian por corrida).
 - **Movimiento idealizado**: traslados **instantáneos** (sin ruta/tiempo/colisiones); costo energético **fijo**.
 - **Sin criterio de paro global**: con todo en 0% el ciclo **continúa** (no hay meta *Stop*).
@@ -106,20 +106,20 @@ El objetivo didáctico es ir **más allá del agente de reflejo simple**, constr
 
 ---
 
-## 🧠 Instrucciones de control implementadas (del reporte)
+## 🧠 Instrucciones de control implementadas 
 ### 1) `IF SUCIO THEN { limpiar_actual() } ELSE { … }`
 - Condición: **suciedad > 0** en la **habitación actual** y **no** hay limpieza en curso.  
 - Efecto: **inicia** limpieza; en caso **contrario** (ELSE), el agente **no aspira** en ese instante y continúa
   el **ciclo de decisión** (ej. moverse u esperar).
 
-### 2) `REPEAT n { … }` (limpieza por **pasadas**)
+### 2) `REPEAT n { … }` 
 - Si la habitación tiene `pct` de suciedad, se calcula `n = ceil(pct/25)` y se **repite** la secuencia de limpieza
   **n veces** con **chunks de ≤25 puntos**; cada pasada **suma** al **nivel de bolsa**.
 - Durante cada pasada se **pausa el ensuciamiento** del cuarto actual.
 
 ---
 
-## 🧪 Casos de prueba (del reporte)
+## 🧪 Casos de prueba 
 - **IF SUCIO — ejemplo 1/2**: el robot **inicia** limpieza cuando la habitación actual tiene `%>0` y no hay limpieza en curso
   (se ve la **barra “Limpieza”** activa).
 - **REPEAT n — ejemplo**: se observa el avance por **pasadas** (~25 puntos) y el **aumento de la bolsa** cada pasada.
